@@ -1,6 +1,17 @@
 #ifndef C_H
 #define C_H
 
+#include<vector>
+
+struct BoundingBox
+{
+    int maxx;
+    int minx;
+    int maxy;
+    int miny;
+    float area;
+};
+
 struct Point
 {
     int x;

@@ -1,3 +1,6 @@
+#ifndef R_H
+#define R_H
+
 #include "common.h"
 
-int **spanningTree(Wire *W, int numWires, int numPins);
+#endif
