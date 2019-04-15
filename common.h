@@ -39,6 +39,7 @@ struct Wire
     //vector<int> found;
 
     int colour;
+    int r, g, b;
     int weight;
 
     //A counter for the wires encountered by this wire

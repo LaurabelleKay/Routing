@@ -10,6 +10,7 @@
 
 #include "main.h"
 #include "router.h"
+//#include "display.h"
 
 using namespace std;
 
@@ -82,7 +83,9 @@ int main(int argc, char **argv)
     {
         infile >> W[i].numPins;
         maxPins = maxPins < W[i].numPins ? W[i].numPins : maxPins;
-        W[i].colour = i + 4;
+        W[i].r = rand() % 255;
+        W[i].g = rand() % 255;
+        W[i].b = rand() % 255;
         W[i].pins = new int *[W[i].numPins];
         W[i].found = new bool[W[i].numPins];
         for (int j = 0; j < W[i].numPins; j++)
@@ -96,6 +99,8 @@ int main(int argc, char **argv)
     printf("Initialising Search Space...\n");
 
     init(points, W, gridx, gridy, numWires, numCells, cells); //Initialise search space
+
+    //drawGrid(gridx, gridy, points, W);
 
     printf("Spanning Tree...\n");
 
@@ -143,10 +148,11 @@ int main(int argc, char **argv)
             count ++;
         }
     }
+
+    printf("Concurrent: %d\n", count);
    
    schedule(points, W, edges, routeList, BB, gridx, gridy, numWires);
 
-    //launch kernels
     return 0;
 }
 
