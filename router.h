@@ -13,5 +13,6 @@ void schedule(
     vector<BoundingBox> BB,
     int gridx,
     int gridy,
-    int numWires);
+    int numEdges);
+    
 #endif

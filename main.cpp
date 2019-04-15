@@ -6,7 +6,7 @@
 #include <vector>
 #include <queue>
 #include <set>
-#include <SFML/Graphics.hpp>
+
 
 #include "main.h"
 #include "router.h"
@@ -17,24 +17,6 @@ using namespace std;
 
 int main(int argc, char **argv)
 {
-    /*sf::RenderWindow window(sf::VideoMode(200, 200), "SFML works!");
-    sf::CircleShape shape(100.f);
-    shape.setFillColor(sf::Color::Green);
-
-    while (window.isOpen())
-    {
-        sf::Event event;
-        while (window.pollEvent(event))
-        {
-            if (event.type == sf::Event::Closed)
-                window.close();
-        }
-
-        window.clear();
-        window.draw(shape);
-        window.display();
-    }*/
-
     int gridx, gridy; //Grid sizes
     int numCells;
     int numWires;
@@ -118,7 +100,7 @@ int main(int argc, char **argv)
     printf("Spanning Tree...\n");
 
     vector<vector<pair<int, int>>>edges(numWires);
-    spanningTree(W, numWires, edges);
+    int numEdges = spanningTree(W, numWires, edges);
 
     priority_queue<pair<int, int>>PQ;
 
@@ -163,6 +145,7 @@ int main(int argc, char **argv)
     }
    
    schedule(points, W, edges, routeList, BB, gridx, gridy, numWires);
+
     //launch kernels
     return 0;
 }
@@ -214,9 +197,11 @@ BoundingBox boundingBox(Wire W)
 
     return BB;
 }
-//TODO: Return total number of edges
-void spanningTree(Wire *W, int numWires, vector<vector<pair<int, int>>> &edges)
+
+int spanningTree(Wire *W, int numWires, vector<vector<pair<int, int>>> &edges)
 {
+    int count = 0;
+
     set<int> pins;
     vector<vector<vector<int>>> adj(numWires);
 
@@ -268,8 +253,11 @@ void spanningTree(Wire *W, int numWires, vector<vector<pair<int, int>>> &edges)
             edges[i].push_back(make_pair(x, y));
             sel[y] = true;
             numEdge++;
+            count++;
         }
     }
+
+    return count;
 }
 
 void init(Point **points, Wire *W, int gridx, int gridy, int numWires, int numCells, int **cells)

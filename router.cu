@@ -8,7 +8,7 @@
 #include "common.h"
 
 #define MAX_SHM 1024
-#define EMPTY 1
+#define EMPTY -1
 #define TRUE 1
 #define FALSE 0
 
@@ -213,10 +213,9 @@ void schedule(
 
    int rTop, int rBottom, int rLeft, int rRight; //Region boundaries
 
-   //TODO: Malloc the stuff & copy
    //TODO: figure out how to store the route
    //TODO: Also need to return if the routing was successful
-   
+
    int s = 0;
 
     for(unsigned int i = 0; i < routeList.size(); i++)
@@ -283,11 +282,11 @@ void gridToGraph(Point **points, int *graph, int gridx, int gridy)
       {
          if(points[i][j].obstructed == true)
          {
-            graph[gridy * i + j] = 1;
+            graph[gridy * i + j] = 0;
          }
          else
          {
-            graph[gridy * i + j] = -1;
+            graph[gridy * i + j] = EMPTY;
          }
       }
    }
