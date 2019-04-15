@@ -15,7 +15,6 @@ using namespace std;
 
 #define SFML_STATIC
 
-
 int main(int argc, char **argv)
 {
     /*sf::RenderWindow window(sf::VideoMode(200, 200), "SFML works!");
@@ -54,8 +53,6 @@ int main(int argc, char **argv)
     {
         filename = argv[1];
     }
-    
-
     
     infile.open(filename);
     if(!infile)
@@ -123,7 +120,7 @@ int main(int argc, char **argv)
     vector<vector<pair<int, int>>>edges(numWires);
     spanningTree(W, numWires, edges);
 
-    priority_queue<pair<float, int>>PQ;
+    priority_queue<pair<int, int>>PQ;
 
     vector<BoundingBox> BB(numWires);
     for(int i = 0; i < numWires; i++)
@@ -133,14 +130,17 @@ int main(int argc, char **argv)
     }
 
     vector<vector<int>> dependencyList(numWires);
+    vector<bool> done(numWires);
+
     BoundingBox B;
 
     while(!PQ.empty())
     {
         B = BB[PQ.top().second];
+        done[PQ.top().second] = true;
         for(int i = 0; i < numWires; i++)
         {
-            if(i != PQ.top().second)
+            if(i != PQ.top().second && !done[i])
             {
                 if(hasOverlap(B, BB[i]))
                 {
@@ -151,28 +151,29 @@ int main(int argc, char **argv)
         PQ.pop();
     }
 
-    for (int i = 0; i < numWires; i++)
+    int count = 0;
+    vector<int> routeList;
+    for(int i = 0; i < numWires; i++)
     {
-        PQ.push(make_pair(BB[i].area, i));
+        if(dependencyList[i].empty())
+        {
+            routeList.push_back(i);
+            count ++;
+        }
     }
-
-    //? find overlaps
+   
+   schedule(points, W, edges, routeList, BB, gridx, gridy, numWires);
     //launch kernels
     return 0;
 }
 
 bool hasOverlap(BoundingBox a, BoundingBox b)
 {
-    if(a.minx > b.maxx || b.maxx > a.minx)
+    if(a.minx < b.maxx && a.maxx > b.minx && a.miny < b.maxy && a.maxy > b.miny)
     {
-        return false;
+        return true;
     }
-    if(a.miny < b.maxy || b.miny < a.maxy)
-    {
-        return false;
-    }
-
-    return true;
+    return false;
 }
 
 //Calculate the bounding for for every pin in this net
@@ -208,8 +209,6 @@ BoundingBox boundingBox(Wire W)
     BB.maxy = maxY;
     BB.minx = minX;
     BB.miny = minY;
-    
-    printf("maxx: %d, minx: %d, maxy: %d, miny: %d\n", maxX, minX, maxY, minY);
 
     BB.area = (maxX - minX) * (maxY - minY);
 

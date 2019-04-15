@@ -2,5 +2,16 @@
 #define R_H
 
 #include "common.h"
+using namespace::std;
 
+void gridToGraph(Point **points, int *graph, int gridx, int gridy);
+void schedule(
+    Point **points,
+    Wire *W,
+    vector<vector<pair<int, int>>> edges,
+    vector<int> routeList,
+    vector<BoundingBox> BB,
+    int gridx,
+    int gridy,
+    int numWires);
 #endif

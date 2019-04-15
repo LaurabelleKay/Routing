@@ -9,7 +9,7 @@ struct BoundingBox
     int minx;
     int maxy;
     int miny;
-    float area;
+    int area;
 };
 
 struct Point
