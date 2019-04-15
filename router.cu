@@ -8,7 +8,14 @@
 #include "common.h"
 
 #define MAX_SHM 1024
-#define index(i, j) (MAX_SHM * i + j)
+#define EMPTY 1
+#define TRUE 1
+#define FALSE 0
+
+#define index(i, j) (MAX_SHM * (i) + (j))
+#define min(a, b) (((a) < (b)) ? (a) : (b))
+#define max(a, b) (((a) > (b)) ? (a) : (b))
+
 
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
@@ -21,11 +28,17 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 }
 
 __global__
-void LeeMoore(
-   int sourcex, //! An array of N where N is number of regions
-   int sourcey, 
-   int sinkx,
-   int sinky,
+void leeMoore(
+   int srcx, 
+   int srcy, 
+   int snkx,
+   int snky,
+   int rTop,
+   int rBottom, 
+   int rLeft,
+   int rRight,
+   int gridx, 
+   int gridy,
    int *graph,
    int *route
 )
@@ -34,34 +47,122 @@ void LeeMoore(
    int x = threadIdx.x;
    int y = threadIdx.y;
 
+   /*int srcx = sourcex[bid];
+   int snkx = sinkx[bid];
+   int srcy = sourcey[bid];
+   int snky = sinky[bid];*/
+
    __shared__ int frontier[MAX_SHM];
    __shared__ int costs[MAX_SHM];
    __shared__ int tempCosts[MAX_SHM];
    __shared__ int done;
 
-   //TODO: Get the region min & max points
-   //TODO: Use min & max to get offsets
-   //TODO: load into shm
-   
+   //int rTop, int rBottom, int rLeft, int rRight; //Region boundaries
+
+   int cost;
+
+   //Make sure the region isn't out of bounds of the grid
+   /*rRight = max(srcx, snkx) + 2;
+   rRight = rRight >= gridx ? (gridx - 1) : rRight; 
+
+   rLeft = min(srcx, snkx) - 2;
+   rLeft = rLeft < 0 ? 0 : rLeft;
+
+   rTop = min(srcy, nky) - 2;
+   rTop = rTop < 0 ? 0 : rTop;
+
+   rBottom = max(srcy, snky) + 2;
+   rBottom = rBotton >= gridy ? (gridy - 1) : rBottom;*/
+
+   int xg, yg; //Locations on the graph for this thread to read data from 
+   xg = rLeft + x;
+   yg = rTop + y;
+
+   done = 0; //FIXME: Don't think this will work!
+
+   if(srcx - rLeft == x && srcy - rTop == y)
+   {
+      frontier[index(x, y)] = TRUE;
+   }
+
    while(!done)
    {
+      done = 1;
       if(frontier[index(x, y)])
       {
-         frontier[index(x, y)] = 0;
+         frontier[index(x, y)] = FALSE;
 
-         //TODO: for all neighbours
-         // if (graph[n] ! obsructed)
-         //    cost = costs[x, y] + 1
-         //    if cost < tempCosts[n]
-         //       tempCost[n] = cost
+         //Assess top neighbour
+         if(index(x, y) > rTop)
+         {
+            if(graph[gridx * xg + (yg - 1)] == EMPTY) //Check for an obstruction
+            {
+               cost = costs[index(x, y)] + 1;
+
+               //We only want to replace the cost if it's lower
+               if(cost < tempCost[index(x, y - 1)])
+               {
+                  tempCosts[index(x, y - 1)] = cost;
+               }
+
+            }
+         }
+
+         //Assess bottom neighbour
+         if(index(x, y) < rBottom)
+         {
+            if(graph[gridx * xg + (yg + 1)] == EMPTY)
+            {
+               cost = costs[index(x, y)] + 1;
+               if(cost < tempCost[index(x, y + 1)])
+               {
+                  tempCosts[index(x, y + 1)] = cost;
+               }
+
+            }
+         }
+
+         //Assess left neighbour
+         if(index(x, y) < rRight)
+         {
+            if(graph[gridx * (xg + 1) + yg] == EMPTY)
+            {
+               cost = costs[index(x, y)] + 1;
+               if(cost < tempCost[index(x + 1, y)])
+               {
+                  tempCosts[index(x + 1, y)] = cost;
+               }
+
+            }
+         }
+
+         //Assess right neighbour
+         if(index(x, y) > rLeft)
+         {
+            if(graph[gridx * (xg - 1) + yg] == EMPTY)
+            {
+               cost = costs[index(x, y)] + 1;
+               if(cost < tempCost[index(x - 1, y)])
+               {
+                  tempCosts[index(x - 1, y)] = cost;
+               }
+
+            }
+         }
       }
+
       __syncthreads();
 
-      //if(cost[id] > temp[id])
-         //cost[id] = temp[id]
-         //frontier[id] = true
-         //done = 0
+      if(costs[index(x, y)] > tempCosts[index(x, y)])
+      {
+         cost[index(x, y)] = tempCosts[index(x, y)];
+         frontier[index(x, y)] = TRUE;
+         done = 0;
+      }
    }
+
+   __syncthreads();
+   printf("Done! (maybe)\n");
 }
 
 void schedule(
@@ -72,7 +173,7 @@ void schedule(
    vector<BoundingBox> BB,
    int gridx,
    int gridy,
-   int numWires)
+   int numEdges)
 {
    int *graph;
 
@@ -81,10 +182,96 @@ void schedule(
    
    gridToGraph(points, graph, gridx, gridy);
 
+  /* vector<int> sourcex;
+   vector<int> sourcey;
+   vector<int> sinkx;
+   vector<int> sinky;
+
+   int val;
+
    for(unsigned int i = 0; i < routeList.size(); i++)
    {
+      for(unsigned int j = 0; j < edges[i].size(); j++)
+      {
+         val = W[i].pins[edges[i].first][0];
+         sourcex.push_back(val);
 
+         val = W[i].pins[edges[i].second][0];
+         sinkx.push_back(val);
+
+         val = W[i].pins[edges[i].first][1];
+         sourcey.push_back(val);
+
+         val = W[i].pins[edges[i].second][1];
+         sinky.push_back(val);
+      }
+   }*/
+
+   int srcx, srcy, snkx, snky;
+
+   cudaStream_t *streams = (cudaStream_t *)malloc(numEdges * sizeof(cudaStream_t));
+
+   int rTop, int rBottom, int rLeft, int rRight; //Region boundaries
+
+   //TODO: Malloc the stuff & copy
+   //TODO: figure out how to store the route
+   //TODO: Also need to return if the routing was successful
+   
+   int s = 0;
+
+    for(unsigned int i = 0; i < routeList.size(); i++)
+   {
+      for(unsigned int j = 0; j < edges[i].size(); j++)
+      {
+         srcx = W[i].pins[edges[i].first][0];
+         snkx = W[i].pins[edges[i].second][0];
+         srcy = W[i].pins[edges[i].first][1];
+         snky = W[i].pins[edges[i].second][1];
+
+         rRight = max(srcx, snkx) + 2;
+         rRight = rRight >= gridx ? (gridx - 1) : rRight; 
+
+         rLeft = min(srcx, snkx) - 2;
+         rLeft = rLeft < 0 ? 0 : rLeft;
+
+         rTop = min(srcy, nky) - 2;
+         rTop = rTop < 0 ? 0 : rTop;
+
+         rBottom = max(srcy, snky) + 2;
+         rBottom = rBotton >= gridy ? (gridy - 1) : rBottom;
+
+         int dimx = rRight - rLeft;
+         int dimy = rBottom - rTop;
+
+         cudaStreamCreate(&(streams[s]));
+         dim3 dimBlock(dimx, dimy);
+
+         leeMoore<<<1, dimBlock, 0, streams[s++]>>>(srcx, srcy, snkx, snky, 
+                                                   rTop, rBottom, rLeft, rRight, 
+                                                   graph, route);
+      }
    }
+
+   cudaDevideSynchronize();
+
+   /*int *srcx = &sourcex[0];
+   int *srcy = &sourcey[0];
+   int *snkx = &sinkx[0];
+   int *snky = &snky[0];
+
+   
+   //Make sure the region isn't out of bounds of the grid
+   rRight = max(srcx, snkx) + 2;
+   rRight = rRight >= gridx ? (gridx - 1) : rRight; 
+
+   rLeft = min(srcx, snkx) - 2;
+   rLeft = rLeft < 0 ? 0 : rLeft;
+
+   rTop = min(srcy, nky) - 2;
+   rTop = rTop < 0 ? 0 : rTop;
+
+   rBottom = max(srcy, snky) + 2;
+   rBottom = rBotton >= gridy ? (gridy - 1) : rBottom;*/
    
 }
 

@@ -214,7 +214,7 @@ BoundingBox boundingBox(Wire W)
 
     return BB;
 }
-
+//TODO: Return total number of edges
 void spanningTree(Wire *W, int numWires, vector<vector<pair<int, int>>> &edges)
 {
     set<int> pins;
