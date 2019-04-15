@@ -12,7 +12,7 @@
 #define TRUE 1
 #define FALSE 0
 
-#define index(i, j) (MAX_SHM * (i) + (j))
+#define index(k, i, j) ((k) * (i) + (j))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 
@@ -39,8 +39,8 @@ void leeMoore(
    int rRight,
    int gridx, 
    int gridy,
-   int *graph,
-   int *route
+   int *graph
+   //int *route
 )
 {
    int bid = blockIdx.x;
@@ -78,73 +78,93 @@ void leeMoore(
    xg = rLeft + x;
    yg = rTop + y;
 
-   done = 0; //FIXME: Don't think this will work!
+   int dimx = rRight - rLeft;
+   int dimy = rBottom - rTop;
 
+   done = 0; //FIXME: Don't think this will work!
+   int count = 0;
+
+   //printf("%d\n", index(dimx, x, y));
+   
+   costs[index(dimy, x, y)] = 1000;
+   tempCosts[index(dimy, x, y)] = 1E04;
+   frontier[index(dimy, x, y)] = false;
+
+   //Set the source as the frontier, and its cost as 0
    if(srcx - rLeft == x && srcy - rTop == y)
    {
-      frontier[index(x, y)] = TRUE;
+      printf("%d - %d == %d | %d - %d == %d\n", srcx, rLeft, x, srcy, rTop, y);
+      frontier[index(dimy, x, y)] = TRUE;
+      costs[index(dimy, x, y)] = 0;
+      tempCosts[index(dimy, x, y)] = 0;
    }
 
-   while(!done)
+   //FIXME: The sink is set as an obstruction!!
+   if(snkx - rLeft == x && snky - rTop == y)
    {
-      done = 1;
-      if(frontier[index(x, y)])
+     printf("Sink reachable!\n");
+   }
+
+   while(count++ < 10000)
+   {
+      if(frontier[index(dimy, x, y)])
       {
-         frontier[index(x, y)] = FALSE;
+         frontier[index(dimy, x, y)] = FALSE;
+
+         
 
          //Assess top neighbour
-         if(index(x, y) > rTop)
+         if(yg > rTop)
          {
-            if(graph[gridx * xg + (yg - 1)] == EMPTY) //Check for an obstruction
+            if(graph[gridy * xg + (yg - 1)] == EMPTY) //Check for an obstruction
             {
-               cost = costs[index(x, y)] + 1;
-
+               cost = costs[index(dimy, x, y)] + 1;
                //We only want to replace the cost if it's lower
-               if(cost < tempCost[index(x, y - 1)])
+               if(cost < tempCosts[index(dimy, x, y - 1)])
                {
-                  tempCosts[index(x, y - 1)] = cost;
+                  tempCosts[index(dimy, x, y - 1)] = cost;
                }
 
             }
          }
 
          //Assess bottom neighbour
-         if(index(x, y) < rBottom)
+         if(yg < rBottom)
          {
-            if(graph[gridx * xg + (yg + 1)] == EMPTY)
+            if(graph[gridy * xg + (yg + 1)] == EMPTY)
             {
-               cost = costs[index(x, y)] + 1;
-               if(cost < tempCost[index(x, y + 1)])
+               cost = costs[index(dimy, x, y)] + 1;
+               if(cost < tempCosts[index(dimy, x, y + 1)])
                {
-                  tempCosts[index(x, y + 1)] = cost;
+                  tempCosts[index(dimy, x, y + 1)] = cost;
                }
 
             }
          }
 
          //Assess left neighbour
-         if(index(x, y) < rRight)
+         if(xg < rRight)
          {
-            if(graph[gridx * (xg + 1) + yg] == EMPTY)
+            if(graph[gridy * (xg + 1) + yg] == EMPTY)
             {
-               cost = costs[index(x, y)] + 1;
-               if(cost < tempCost[index(x + 1, y)])
+               cost = costs[index(dimy, x, y)] + 1;
+               if(cost < tempCosts[index(dimy, x + 1, y)])
                {
-                  tempCosts[index(x + 1, y)] = cost;
+                  tempCosts[index(dimy, x + 1, y)] = cost;
                }
 
             }
          }
 
          //Assess right neighbour
-         if(index(x, y) > rLeft)
+         if(xg > rLeft)
          {
-            if(graph[gridx * (xg - 1) + yg] == EMPTY)
+            if(graph[gridy * (xg - 1) + yg] == EMPTY)
             {
-               cost = costs[index(x, y)] + 1;
-               if(cost < tempCost[index(x - 1, y)])
+               cost = costs[index(dimy, x, y)] + 1;
+               if(cost < tempCosts[index(dimy, x - 1, y)])
                {
-                  tempCosts[index(x - 1, y)] = cost;
+                  tempCosts[index(dimy, x - 1, y)] = cost;
                }
 
             }
@@ -152,17 +172,19 @@ void leeMoore(
       }
 
       __syncthreads();
-
-      if(costs[index(x, y)] > tempCosts[index(x, y)])
+      
+      if(costs[index(dimy, x, y)] > tempCosts[index(dimy, x, y)])
       {
-         cost[index(x, y)] = tempCosts[index(x, y)];
-         frontier[index(x, y)] = TRUE;
-         done = 0;
+         costs[index(dimy, x, y)] = tempCosts[index(dimy, x, y)];
+         frontier[index(dimy, x, y)] = TRUE;
       }
+      tempCosts[index(dimy, x, y)] = costs[index(dimy, x, y)];
+
+       __syncthreads();
    }
 
    __syncthreads();
-   printf("Done! (maybe)\n");
+   //printf("%d\n", done);
 }
 
 void schedule(
@@ -211,21 +233,18 @@ void schedule(
 
    cudaStream_t *streams = (cudaStream_t *)malloc(numEdges * sizeof(cudaStream_t));
 
-   int rTop, int rBottom, int rLeft, int rRight; //Region boundaries
-
-   //TODO: figure out how to store the route
-   //TODO: Also need to return if the routing was successful
+   int rTop; int rBottom; int rLeft; int rRight; //Region boundaries
 
    int s = 0;
 
-    for(unsigned int i = 0; i < routeList.size(); i++)
+    for(unsigned int i = 0; i < 1/*routeList.size()*/; i++)
    {
-      for(unsigned int j = 0; j < edges[i].size(); j++)
+      for(unsigned int j = 0; j < 1/*edges[i].size()*/; j++)
       {
-         srcx = W[i].pins[edges[i].first][0];
-         snkx = W[i].pins[edges[i].second][0];
-         srcy = W[i].pins[edges[i].first][1];
-         snky = W[i].pins[edges[i].second][1];
+         srcx = W[i].pins[edges[i][j].first][0];
+         snkx = W[i].pins[edges[i][j].second][0];
+         srcy = W[i].pins[edges[i][j].first][1];
+         snky = W[i].pins[edges[i][j].second][1];
 
          rRight = max(srcx, snkx) + 2;
          rRight = rRight >= gridx ? (gridx - 1) : rRight; 
@@ -233,25 +252,33 @@ void schedule(
          rLeft = min(srcx, snkx) - 2;
          rLeft = rLeft < 0 ? 0 : rLeft;
 
-         rTop = min(srcy, nky) - 2;
+         rTop = min(srcy, snky) - 2;
          rTop = rTop < 0 ? 0 : rTop;
 
          rBottom = max(srcy, snky) + 2;
-         rBottom = rBotton >= gridy ? (gridy - 1) : rBottom;
+         rBottom = rBottom >= gridy ? (gridy - 1) : rBottom;
 
          int dimx = rRight - rLeft;
          int dimy = rBottom - rTop;
 
-         cudaStreamCreate(&(streams[s]));
+         gpuErrchk(cudaStreamCreate(&(streams[s])));
+         
          dim3 dimBlock(dimx, dimy);
+         printf("rTop: %d, rBottom: %d, rLeft: %d, rRight: %d\n", rTop, rBottom, rLeft, rRight);
+         printf("dx: %d, dy: %d\n", dimx, dimy);
+         printf("src: (%d, %d)  snk: (%d, %d)\n", srcx, srcy, snkx, snky);
 
+         //TODO: figure out how to store the route
+         //TODO: Also need to return if the routing was successful
          leeMoore<<<1, dimBlock, 0, streams[s++]>>>(srcx, srcy, snkx, snky, 
                                                    rTop, rBottom, rLeft, rRight, 
-                                                   graph, route);
+                                                   gridx, gridy, graph);
+
+         gpuErrchk(cudaPeekAtLastError());
       }
    }
 
-   cudaDevideSynchronize();
+   gpuErrchk(cudaDeviceSynchronize());
 
    /*int *srcx = &sourcex[0];
    int *srcy = &sourcey[0];
