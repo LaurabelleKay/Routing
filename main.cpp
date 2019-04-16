@@ -151,7 +151,7 @@ int main(int argc, char **argv)
 
     printf("Concurrent: %d\n", count);
    
-   schedule(points, W, edges, routeList, BB, gridx, gridy, numWires);
+    schedule(points, W, edges, dependencyList, routeList, BB, gridx, gridy, numEdges, numWires);
 
     return 0;
 }

@@ -9,10 +9,12 @@ void schedule(
     Point **points,
     Wire *W,
     vector<vector<pair<int, int>>> edges,
+    vector<vector<int>> dependencyList,
     vector<int> routeList,
     vector<BoundingBox> BB,
     int gridx,
     int gridy,
-    int numEdges);
+    int numEdges,
+    int numWires);
     
 #endif
