@@ -6,13 +6,15 @@
 #include "device_launch_parameters.h"
 
 #include "common.h"
+#include "display.h"
 
 #define MAX_SHM 1024
 #define EMPTY -2
 #define TRUE 1
 #define FALSE 0
+#define EXPANDED -1
 
-#define index(k, i, j) ((k) * (i) + (j))
+//#define index(k, i, j) ((k) * (i) + (j))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 
@@ -50,7 +52,9 @@ void leeMoore(
 
    __shared__ int frontier[MAX_SHM];
    __shared__ int costs[MAX_SHM];
-   __shared__ int tempCosts[MAX_SHM];
+   //__shared__ int tempCosts[MAX_SHM];
+   __shared__ int from1[MAX_SHM];
+   __shared__ int from2[MAX_SHM];
    __shared__ int done;
 
    //int rTop, int rBottom, int rLeft, int rRight; //Region boundaries
@@ -61,134 +65,141 @@ void leeMoore(
    xg = rLeft + x;
    yg = rTop + y;
 
+   //printf("[%d][%d] = %d\n", xg, yg, graph[gridy * xg + yg]);
+
    int dimx = rRight - rLeft;
    int dimy = rBottom - rTop;
+
+   if(x == 0 && y == 0)
+   {
+      for(int i = 0; i < dimx; i++)
+      {
+         for(int j = 0; j < dimy; j++)
+         {
+            printf("%d\t", graph[gridy * (rLeft + i) + (rBottom - j)]);
+         }
+         printf("\n");
+      }
+   }
+   __syncthreads();
+
+   //printf("[%d][%d] maps to [%d][%d]\n", x, y, xg, yg);
 
    done = 0; //FIXME: Don't think this will work!
    int count = 0;
    
-   costs[index(dimy, x, y)] = 1000;
-   tempCosts[index(dimy, x, y)] = 1E04;
-   frontier[index(dimy, x, y)] = false;
+   costs[dimy * x + y] = 1000;
+   frontier[dimy * x + y] = FALSE;
 
    //Set the source as the frontier, and its cost as 0
    if(xg == srcx && yg == srcy)
    {
-      frontier[index(dimy, x, y)] = TRUE;
-      costs[index(dimy, x, y)] = 0;
-      tempCosts[index(dimy, x, y)] = 0;
+      frontier[dimy * x + y] = TRUE;
+      costs[dimy * x + y] = 0;
    }
 
+   from1[dimy * (x + 1) + y] = -30;
+   from2[dimy * (x + 1) + y] = -30;
+
    //Source to sink propagation
-   while(!done)
+   while(count++ < 50)
    {
-      if(frontier[index(dimy, x, y)])
+      if(frontier[dimy * x + y] == TRUE)
       {
-         printf("%d\n", costs[index(dimy, x, y)]);
-         frontier[index(dimy, x, y)] = FALSE;
+         frontier[dimy * x + y] = EXPANDED;
+         //printf("[%d][%d]([%d][%d]) frontier expanded. Cost: %d\n", x, y, xg, yg, costs[dimy * x + y]);
+         //printf("[%d][%d] from [%d][%d]\n", x, y, from1[dimy * x + y], from2[dimy * x + y]);
          done = 1;
 
          if(xg == snkx && yg == snky)
          {
-            printf("Sink found! Cost is: %d\n", costs[index(dimy, x, y)]);
+            printf("Sink found! Cost is: %d\n", costs[dimy * x + y]);
          }
 
          //Assess top neighbour
-         if(yg > rTop)
+         if(yg > 0)
          {
-            if(graph[gridy * xg + (yg - 1)] == EMPTY || graph[gridy * xg + (yg - 1)] == wire) //Check for an obstruction
+            if((graph[gridy * xg + (yg - 1)] == -2 || graph[gridy * xg + (yg - 1)] == wire) && frontier[dimy * x  + (y - 1)] != EXPANDED) //Check for an obstruction
             {
-               cost = costs[index(dimy, x, y)] + 1;
-               //We only want to replace the cost if it's lower
-               if(cost < tempCosts[index(dimy, x, y - 1)])
-               {
-                  tempCosts[index(dimy, x, y - 1)] = cost;
-               }
-
+               cost = costs[dimy * x + y] + 1;
+               costs[dimy * x  + (y - 1)] = cost;
+               frontier[dimy * x  + (y - 1)] = TRUE;
+               from1[dimy * x  + (y - 1)] = x;
+               from2[dimy * x  + (y - 1)] = y;
+               //printf("[%d][%d]([%d][%d]) expands [%d][%d]([%d][%d])\n", x, y, xg, yg, x, y - 1, xg, yg - 1);
             }
          }
 
          //Assess bottom neighbour
-         if(yg < rBottom)
+         if(yg < dimy - 1)
          {
-            if(graph[gridy * xg + (yg + 1)] == EMPTY || graph[gridy * xg + (yg + 1)] == wire)
+            if((graph[gridy * xg + (yg + 1)] == -2 || graph[gridy * xg + (yg + 1)] == wire) && frontier[dimy * x  + (y  + 1)] != EXPANDED)
             {
-               cost = costs[index(dimy, x, y)] + 1;
-               if(cost < tempCosts[index(dimy, x, y + 1)])
-               {
-                  tempCosts[index(dimy, x, y + 1)] = cost;
-               }
-
+               cost = costs[dimy * x + y] + 1;
+               costs[dimy * x  + (y  + 1)] = cost;
+               frontier[dimy * x  + (y  + 1)] = TRUE;
+               from1[dimy * x  + (y  + 1)] = x;
+               from2[dimy * x  + (y  + 1)] = y;
+               //printf("[%d][%d]([%d][%d]) expands [%d][%d]([%d][%d])\n", x, y, xg, yg, x, y + 1, xg, yg + 1);
             }
          }
 
          //Assess left neighbour
-         if(xg < rRight)
+         if(xg < dimx - 1)
          {
-            if(graph[gridy * (xg + 1) + yg] == EMPTY || graph[gridy * (xg + 1) + yg] == wire)
+            if((graph[gridy * (xg + 1) + yg] == -2 || graph[gridy * (xg + 1) + yg] == wire) && frontier[dimy * (x + 1) + y] != EXPANDED)
             {
-               cost = costs[index(dimy, x, y)] + 1;
-               if(cost < tempCosts[index(dimy, x + 1, y)])
-               {
-                  tempCosts[index(dimy, x + 1, y)] = cost;
-               }
-
-            }
+               cost = costs[dimy * x + y] + 1;
+               costs[dimy * (x + 1) + y] = cost;
+               frontier[dimy * (x + 1) + y] = TRUE;
+               from1[dimy * (x + 1) + y] = x;
+               from2[dimy * (x + 1) + y] = y;
+               //printf("[%d][%d]([%d][%d]) expands [%d][%d]([%d][%d])\n", x, y, xg, yg, x + 1, y, xg + 1, yg);
+            }  
          }
 
          //Assess right neighbour
-         if(xg > rLeft)
+         if(x > 0)
          {
-            if(graph[gridy * (xg - 1) + yg] == EMPTY || graph[gridy * (xg - 1) + yg] == wire)
+            if((graph[gridy * (xg - 1) + yg] == -2 || graph[gridy * (xg - 1) + yg] == wire) && frontier[dimy * (x - 1) + y] != EXPANDED)
             {
-               cost = costs[index(dimy, x, y)] + 1;
-               if(cost < tempCosts[index(dimy, x - 1, y)])
-               {
-                  tempCosts[index(dimy, x - 1, y)] = cost;
-               }
-
+               cost = costs[dimy * x + y] + 1;
+               costs[dimy * (x - 1) + y] = cost;
+               frontier[dimy * (x - 1) + y] = TRUE;
+               from1[dimy * (x - 1) + y] = x;
+               from2[dimy * (x - 1) + y] = y;
+               //printf("[%d][%d]([%d][%d]) expands [%d][%d]([%d][%d])\n", x, y, xg, yg, x - 1, y, xg - 1, yg);
             }
          }
-      }
 
+      }
       __syncthreads();
-      
-      if(costs[index(dimy, x, y)] > tempCosts[index(dimy, x, y)])
-      {
-         costs[index(dimy, x, y)] = tempCosts[index(dimy, x, y)];
-         frontier[index(dimy, x, y)] = TRUE;
-         done = 0;
-      }
-      tempCosts[index(dimy, x, y)] = costs[index(dimy, x, y)];
-       __syncthreads();
    }
-
-   frontier[index(dimy, x, y)] = 0;
    done = 0;
-
    //Sink to source route tracing
-   /*if(snkx - rLeft == x && snky - rTop == y)
+   if(snkx - rLeft == x && snky - rTop == y)
    {
-      frontier[index(dimy, x, y)] = 1;
+      frontier[dimy * x + y] = 1;
    }
    while(!done)
    {
-      if(frontier[index(dimy, x, y)])
+      if(frontier[dimy * x + y])
       {
-         frontier[index(dimy, x, y)] = FALSE;
+         frontier[dimy * x + y] = FALSE;
 
          graph[gridy * xg + yg] = wire; //Obstruct this cell in the grid
          if(srcx - rLeft == x && srcy - rTop == y)
          {
+            done = 1;
             break;
          }
          
          //Assess top neighbour
          if(y > 0)
          {
-            if(costs[index(dimy, x, y - 1)] == costs[index(dimy, x, y)] - 1)
+            if(costs[dimy * x  + (y - 1)] == costs[dimy * x + y] - 1)
             {
-               frontier[index(dimy, x, y - 1)] = 1;
+               frontier[dimy * x  + (y - 1)] = 1;
                continue;
             }
          }
@@ -196,9 +207,9 @@ void leeMoore(
          //Assess bottom neighbour
          if(y < dimy)
          {
-            if(costs[index(dimy, x, y + 1)] == costs[index(dimy, x, y)] - 1)
+            if(costs[dimy * x  + (y  + 1)] == costs[dimy * x + y] - 1)
             {
-               frontier[index(dimy, x, y + 1)] = 1;
+               frontier[dimy * x  + (y  + 1)] = 1;
                continue;
             }
          }
@@ -206,9 +217,9 @@ void leeMoore(
          //Assess left neighbour
          if(x < dimx)
          {
-            if(costs[index(dimy, x + 1, y)] == costs[index(dimy, x, y)] - 1)
+            if(costs[dimy * (x + 1) + y] == costs[dimy * x + y] - 1)
             {
-               frontier[index(dimy, x + 1, y)] = 1;
+               frontier[dimy * (x + 1) + y] = 1;
                continue;
             }
          }
@@ -216,14 +227,14 @@ void leeMoore(
          //Assess right neighbour
          if(x > 0)
          {
-            if(costs[index(dimy, x - 1, y)] == costs[index(dimy, x, y)] - 1)
+            if(costs[dimy * (x - 1) + y] == costs[dimy * x + y] - 1)
             {
-               frontier[index(dimy, x - 1, y)] = 1;
+               frontier[dimy * (x - 1) + y] = 1;
                continue;
             }
          }
       }
-   }*/
+   }
 }
 
 void schedule(
@@ -242,6 +253,8 @@ void schedule(
    gpuErrchk(cudaMallocManaged(&graph, gridx * gridy * sizeof(int)));
    
    gridToGraph(points, graph, gridx, gridy);
+
+   drawGrid(gridx, gridy, graph, W);
 
    int srcx, srcy, snkx, snky;
 
@@ -293,7 +306,8 @@ void schedule(
       }
    }
 
-   gpuErrchk(cudaDeviceSynchronize());   
+   gpuErrchk(cudaDeviceSynchronize());  
+   drawGrid(gridx, gridy, graph, W); 
 }
 
 void gridToGraph(Point **points, int *graph, int gridx, int gridy)
