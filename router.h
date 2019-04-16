@@ -16,5 +16,5 @@ void schedule(
     int gridy,
     int numEdges,
     int numWires);
-    
+
 #endif

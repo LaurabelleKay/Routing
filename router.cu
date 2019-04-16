@@ -18,6 +18,7 @@
 #define TRUE 1
 #define FALSE 0
 #define EXPANDED -1
+#define MAX_ATTEMPTS 10
 
 //#define index(k, i, j) ((k) * (i) + (j))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
@@ -52,6 +53,8 @@ void leeMoore(
    int gridx, 
    int gridy,
    int wire,
+   int edgeIndex,
+   int *success,
    int *graph
    //int *route
 )
@@ -99,7 +102,7 @@ void leeMoore(
    from2[dimy * (x + 1) + y] = -30;
    if(x == 0 & y == 0)
    {
-      printf("Wire: %d\n", wire);
+      success[edgeIndex] = 0;
    }
 
    __shared__ int foundSink;
@@ -203,6 +206,7 @@ void leeMoore(
    { 
       if(foundSink == 1)
       {    
+         success[edgeIndex] = 1;
          xx = x;
          yy = y;
          int found = 0;
@@ -286,179 +290,154 @@ void schedule(
    drawGrid(gridx, gridy, graph, W);
    #endif
 
-   //TODO: Put this whole bit in a loop
    int srcx, srcy, snkx, snky;
-
-   cudaStream_t *streams = (cudaStream_t *)malloc(numEdges * sizeof(cudaStream_t));
-
    int rTop; int rBottom; int rLeft; int rRight; //Region boundaries
+   int s;
 
-   int s = 0;
+   
 
-   for(unsigned int i = 0; i < routeList.size(); i++)
+   int numSuccessful = 0;
+   int attempts = 0;
+
+   //Attempt to route all nets
+   while(!routeList.empty())
    {
-      int ind = routeList[i];
-      printf("ind: %d\n", ind);
-      for(unsigned int j = 0; j < edges[ind].size(); j++)
+      s = 0;
+      cudaStream_t *streams = (cudaStream_t *)malloc(numEdges * sizeof(cudaStream_t)); 
+
+      int *success;
+      gpuErrchk(cudaMallocManaged(&success, numEdges * sizeof(int)));
+
+      int edgeIndex = 0;
+
+      for(unsigned int i = 0; i < routeList.size(); i++)
       {
-         srcx = W[ind].pins[edges[ind][j].first][0];
-         snkx = W[ind].pins[edges[ind][j].second][0];
-         srcy = W[ind].pins[edges[ind][j].first][1];
-         snky = W[ind].pins[edges[ind][j].second][1];
-
-         rRight = max(srcx, snkx) + 2;
-         rRight = rRight >= gridx ? (gridx - 1) : rRight; 
-
-         rLeft = min(srcx, snkx) - 2;
-         rLeft = rLeft < 0 ? 0 : rLeft;
-
-         rTop = min(srcy, snky) - 2;
-         rTop = rTop < 0 ? 0 : rTop;
-
-         rBottom = max(srcy, snky) + 2;
-         rBottom = rBottom >= gridy ? (gridy - 1) : rBottom;
-
-         int dimx = rRight - rLeft;
-         int dimy = rBottom - rTop;
-
-         gpuErrchk(cudaStreamCreate(&(streams[s])));
-         
-         dim3 dimBlock(dimx, dimy);
-         printf("rTop: %d, rBottom: %d, rLeft: %d, rRight: %d\n", rTop, rBottom, rLeft, rRight);
-         printf("dx: %d, dy: %d\n", dimx, dimy);
-         printf("src: (%d, %d)  snk: (%d, %d)\n", srcx, srcy, snkx, snky);
-
-         //TODO: Need to return if the routing was successful
-         leeMoore<<<1, dimBlock, 0, streams[s++]>>>(srcx, srcy, snkx, snky, 
-                                                   rTop, rBottom, rLeft, rRight, 
-                                                   gridx, gridy, ind, graph);
-
-         gpuErrchk(cudaPeekAtLastError());
-      }
-   }
-
-   gpuErrchk(cudaDeviceSynchronize());  
-   for(int i = 0; i < s; i++)
-   {
-      gpuErrchk(cudaStreamDestroy((streams[i])));
-   }
-
-   #ifdef DISPLAY
-   drawGrid(gridx, gridy, graph, W); 
-   #endif
-
-   //Check if was successful
-   vector<int> successful(numWires);
-   vector<int> done(numWires);
-
-   for(unsigned int i = 0; i < routeList.size(); i++)
-   {
-      done[routeList[i]] = 1;
-   }
-
-   vector<vector< std::vector<int>::iterator >> its(dependencyList.size());
-   std::vector<int>::iterator it;
-   for(unsigned int i = 0; i < dependencyList.size(); i++)
-   {
-      for(unsigned int j = 0; j < routeList.size(); j++)
-      {
-         it = std::find(dependencyList[i].begin(), dependencyList[i].end(), routeList[j]);
-         if(it != dependencyList[i].end())
+         int ind = routeList[i];
+         for(unsigned int j = 0; j < edges[ind].size(); j++)
          {
-             dependencyList[i][*it] = 4096;
+            
+            //Get source and sinx coordinates for this edge
+            srcx = W[ind].pins[edges[ind][j].first][0];
+            snkx = W[ind].pins[edges[ind][j].second][0];
+            srcy = W[ind].pins[edges[ind][j].first][1];
+            snky = W[ind].pins[edges[ind][j].second][1];
+
+            //Use the source and sink to create a search region
+            rRight = max(srcx, snkx) + 2;
+            rRight = rRight >= gridx ? (gridx - 1) : rRight; 
+
+            rLeft = min(srcx, snkx) - 2;
+            rLeft = rLeft < 0 ? 0 : rLeft;
+
+            rTop = min(srcy, snky) - 2;
+            rTop = rTop < 0 ? 0 : rTop;
+
+            rBottom = max(srcy, snky) + 2;
+            rBottom = rBottom >= gridy ? (gridy - 1) : rBottom;
+
+            //Calculate block dimensions for the kernel base don region size
+            int dimx = rRight - rLeft;
+            int dimy = rBottom - rTop;
+
+            gpuErrchk(cudaStreamCreate(&(streams[s])));
+            
+            dim3 dimBlock(dimx, dimy);
+            printf("rTop: %d, rBottom: %d, rLeft: %d, rRight: %d\n", rTop, rBottom, rLeft, rRight);
+            printf("dx: %d, dy: %d\n", dimx, dimy);
+            printf("src: (%d, %d)  snk: (%d, %d)\n", srcx, srcy, snkx, snky);
+
+            leeMoore<<<1, dimBlock, 0, streams[s++]>>>(srcx, srcy, snkx, snky, 
+                                                      rTop, rBottom, rLeft, rRight, 
+                                                      gridx, gridy, ind, 
+                                                      edgeIndex, success, graph);
+
+            gpuErrchk(cudaPeekAtLastError());
+            edgeIndex++;
          }
       }
+
+      gpuErrchk(cudaDeviceSynchronize());  
+
+      for(int i = 0; i < s; i++)
+      {
+         gpuErrchk(cudaStreamDestroy((streams[i])));
+      }
+
+      free(streams);
+
+      #ifdef DISPLAY
+      drawGrid(gridx, gridy, graph, W); 
+      #endif
+
+      vector<int> successful(numWires);
+      vector<int> unsucessful;
+      vector<int> done(numWires);
+
+      edgeIndex = 0;
+      for(unsigned int i = 0; i < routeList.size(); i++)
+      {
+         ind = routeList[i];
+         done[routeList[i]] = 1;
+         successful[i] = 1;
+         for(unsigned int j = 0; j < edges[ind].size(); j++)
+         {
+            if(success[edgeIndex] == 0)
+            {
+               W[i].found[edges[ind][j].second] = -1; //The sink for this edge hasn't been found
+               successful[i] = 0; //If any edges are unsucessful, the wire was unsuccessful
+               unsuccessful.push_back(i);
+               edgeIndex++;
+            }
+         }
+      }
+
+      free(success);
+
+      vector<vector< std::vector<int>::iterator >> its(dependencyList.size());
+      std::vector<int>::iterator it;
+      for(unsigned int i = 0; i < dependencyList.size(); i++)
+      {
+         for(unsigned int j = 0; j < routeList.size(); j++)
+         {
+            it = std::find(dependencyList[i].begin(), dependencyList[i].end(), routeList[j]);
+            if(it != dependencyList[i].end())
+            {
+               dependencyList[i][*it] = 4096;
+            }
+         }
+      }
+
+      
+      for(unsigned int i = 0; i < dependencyList.size(); i++)
+      {
+         if(dependencyList[i].empty())
+         {
+            continue;
+         }
+         dependencyList[i].erase(std::remove_if(dependencyList[i].begin(), dependencyList[i].end(), toDelete), dependencyList[i].end());
+      }
+      
+      routeList.clear();
+      numEdges = 0;
+
+      int count = 0;
+      for(unsigned int i = 0; i < dependencyList.size(); i++)
+      {
+         if(dependencyList[i].empty() && done[i] != 1)
+         {
+               routeList.push_back(i);
+               numEdges += edges[i].size();
+               count ++;
+         }
+      }
+
+      printf("concurrent: %d\n", count);
    }
 
-   
-   for(unsigned int i = 0; i < dependencyList.size(); i++)
+   if(numSuccessful != numWires)
    {
-      if(dependencyList[i].empty())
-      {
-         continue;
-      }
-      dependencyList[i].erase(std::remove_if(dependencyList[i].begin(), dependencyList[i].end(), toDelete), dependencyList[i].end());
+      printf("Not all routed!");
    }
-   
-
-  /* for(unsigned int i = 0; i < its.size(); i++)
-   {
-      for(unsigned int j = 0; j < its[i].size(); j++)
-      {
-         dependencyList[i].erase(its[i][j]);
-      }
-   }*/
-
-
-   routeList.clear();
-
-   int count = 0;
-    for(unsigned int i = 0; i < dependencyList.size(); i++)
-    {
-        if(dependencyList[i].empty() && done[i] != 1)
-        {
-            routeList.push_back(i);
-            count ++;
-        }
-    }
-
-    printf("concurrent: %d\n", count);
-
-
-   
-
-
-
-   //cudaStream_t *streams = (cudaStream_t *)malloc(numEdges * sizeof(cudaStream_t));
-
-   s = 0;
-
-   for(unsigned int i = 0; i < routeList.size(); i++)
-   {
-      //i = 1;
-      int ind = routeList[i];
-      for(unsigned int j = 0; j < edges[ind].size(); j++)
-      {
-         //j = 1;
-         srcx = W[ind].pins[edges[ind][j].first][0];
-         snkx = W[ind].pins[edges[ind][j].second][0];
-         srcy = W[ind].pins[edges[ind][j].first][1];
-         snky = W[ind].pins[edges[ind][j].second][1];
-
-         rRight = max(srcx, snkx) + 2;
-         rRight = rRight >= gridx ? (gridx - 1) : rRight; 
-
-         rLeft = min(srcx, snkx) - 2;
-         rLeft = rLeft < 0 ? 0 : rLeft;
-
-         rTop = min(srcy, snky) - 2;
-         rTop = rTop < 0 ? 0 : rTop;
-
-         rBottom = max(srcy, snky) + 2;
-         rBottom = rBottom >= gridy ? (gridy - 1) : rBottom;
-
-         int dimx = rRight - rLeft;
-         int dimy = rBottom - rTop;
-
-         gpuErrchk(cudaStreamCreate(&(streams[s])));
-         
-         dim3 dimBlock(dimx, dimy);
-         printf("src: (%d, %d)  snk: (%d, %d)\n", srcx, srcy, snkx, snky);
-         printf("dx: %d, dy: %d\n", dimx, dimy);
-
-         //TODO: Need to return if the routing was successful
-         leeMoore<<<1, dimBlock, 0, streams[s++]>>>(srcx, srcy, snkx, snky, 
-                                                   rTop, rBottom, rLeft, rRight, 
-                                                   gridx, gridy, ind, graph);
-
-         gpuErrchk(cudaPeekAtLastError());
-      }
-   }
-   gpuErrchk(cudaDeviceSynchronize());  
-
-   #ifdef DISPLAY
-   drawGrid(gridx, gridy, graph, W); 
-   #endif
   
 }
 
@@ -469,6 +448,17 @@ void gridToGraph(Point **points, int *graph, int gridx, int gridy)
       for(int j = 0; j < gridy; j++)
       {
          graph[gridy * i + j] = points[i][j].obstructedBy;
+      }
+   }
+}
+
+void graphToGrid(Point **points, int *graph, int gridx, int gridy)
+{
+   for(int i = 0; i < gridx; i++)
+   {
+      for(int j = 0; j < gridy; j++)
+      {
+         points[i][j].obstructedBy = graph[gridy * i + j];
       }
    }
 }

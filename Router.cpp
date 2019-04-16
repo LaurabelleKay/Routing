@@ -106,9 +106,6 @@ int main(int argc, char **argv)
     int attempts = 0;
     vector<int> bestWeights(numWires);
 
-#ifdef LIN
-    drawGrid(numCells, numWires, gridx, gridy, cells, W, algorithm);
-#endif
 
     queue<int> unrouted;
     queue<int> backup; 
@@ -317,14 +314,10 @@ int main(int argc, char **argv)
         {
             success ++;
         }
-#ifdef LIN
-        displayResult(!W[i].routed, i);
-#endif
+
     }
 
-#ifdef LIN
-    displayStats(success, attempts, numWires);
-#endif
+
     cout << success << "/" << numWires << "\n";
     cout << "Routing done\n";
 

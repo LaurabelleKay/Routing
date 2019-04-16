@@ -34,13 +34,12 @@ struct Wire
     int numPins;
 
     int **pins;
-    bool *found;
+    int *found;
     //vector<vector<int>> pins;
     //vector<int> found;
 
     int colour;
     int r, g, b;
-    int weight;
 
     //A counter for the wires encountered by this wire
     int *counter;

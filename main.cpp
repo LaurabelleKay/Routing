@@ -21,16 +21,14 @@ int main(int argc, char **argv)
     int gridx, gridy; //Grid sizes
     int numCells;
     int numWires;
-    int algorithm;
     int maxPins = 0;
     char *filename;
     ifstream infile;
 
-    if(argc < 3)
+    if(argc < 2)
     {
-        cout << "Invalid number of arguments" << endl;
+        cout << "Invalid number of arguments: using default" << endl;
         filename = "benchmarks/kuma.txt";
-        algorithm = 0;
     }
     else
     {
@@ -43,29 +41,11 @@ int main(int argc, char **argv)
         printf("Unable to open file\n");
         exit(1);
     }
-    printf("File opened\n");
 
     infile >> gridx;
     infile >> gridy;
     infile >> numCells;
 
-    /*string algo = argv[2];
-
-    if (algo.compare("LM") == 0 || algo.compare("Lee Moore") == 0)
-    {
-        algorithm = 0;
-    }
-    else if (algo.compare("A") == 0 || algo.compare("A*") == 0)
-    {
-        algorithm = 1;
-    }
-    else
-    {
-        cout << "Invalid Algorithm\n";
-        exit(-1);
-    }*/
-
-    printf("Reading info...\n");
     //Read in cell information
     int **cells = new int *[numCells];
     for (int i = 0; i < numCells; i++)
@@ -75,6 +55,7 @@ int main(int argc, char **argv)
         infile >> cells[i][1];
     }
 
+    //Read in net/wire information
     infile >> numWires;
     Wire *W = new Wire[numWires];
     Point **points = new Point *[gridx];
@@ -87,7 +68,7 @@ int main(int argc, char **argv)
         W[i].g = rand() % 255;
         W[i].b = rand() % 255;
         W[i].pins = new int *[W[i].numPins];
-        W[i].found = new bool[W[i].numPins];
+        W[i].found = new int[W[i].numPins];
         for (int j = 0; j < W[i].numPins; j++)
         {
             W[i].pins[j] = new int[2];
@@ -95,20 +76,16 @@ int main(int argc, char **argv)
             infile >> W[i].pins[j][1];
         }
     }
-    
-    printf("Initialising Search Space...\n");
 
     init(points, W, gridx, gridy, numWires, numCells, cells); //Initialise search space
 
-
-
-    printf("Spanning Tree...\n");
-
     vector<vector<pair<int, int>>>edges(numWires);
-    int numEdges = spanningTree(W, numWires, edges);
+
+    int numEdges = spanningTree(W, numWires, edges); //Calculate the spanning tree for each net
 
     priority_queue<pair<int, int>>PQ;
 
+    //Calculate the bounding box for each net and store in the priority queue (highest first)
     vector<BoundingBox> BB(numWires);
     for(int i = 0; i < numWires; i++)
     {
@@ -124,11 +101,13 @@ int main(int argc, char **argv)
     while(!PQ.empty())
     {
         B = BB[PQ.top().second];
-        done[PQ.top().second] = true;
+        done[PQ.top().second] = true;        
         for(int i = 0; i < numWires; i++)
         {
+            //Check each other net
             if(i != PQ.top().second && !done[i])
             {
+                //Any that have overlap are dependent on this net
                 if(hasOverlap(B, BB[i]))
                 {
                     dependencyList[i].push_back(PQ.top().second);
@@ -140,6 +119,8 @@ int main(int argc, char **argv)
 
     int count = 0;
     vector<int> routeList;
+
+    //Put any with no overlap on the route list
     for(int i = 0; i < numWires; i++)
     {
         if(dependencyList[i].empty())
@@ -156,6 +137,7 @@ int main(int argc, char **argv)
     return 0;
 }
 
+//Determines if 2 bounding boxes overlap by comparing the edges
 bool hasOverlap(BoundingBox a, BoundingBox b)
 {
     if(a.minx < b.maxx && a.maxx > b.minx && a.miny < b.maxy && a.maxy > b.miny)
@@ -204,13 +186,15 @@ BoundingBox boundingBox(Wire W)
     return BB;
 }
 
+//Calculate the spanning tree using Prim's algorithm
 int spanningTree(Wire *W, int numWires, vector<vector<pair<int, int>>> &edges)
 {
-    int count = 0;
+    int count = 0; //Counts the total number of edges
 
     set<int> pins;
     vector<vector<vector<int>>> adj(numWires);
 
+    //Convert to adjacency matrix 
     for (int i = 0; i < numWires; i++)
     {
         adj[i] = vector<vector<int>>(W[i].numPins);
@@ -232,7 +216,7 @@ int spanningTree(Wire *W, int numWires, vector<vector<pair<int, int>>> &edges)
         sel[0] = true;
 
         int x, y;
-        while (numEdge < W[i].numPins - 1)
+        while (numEdge < W[i].numPins - 1) //Tree always has N - 1 edges
         {
             int min = 1E09;
             x = 0;
@@ -244,6 +228,7 @@ int spanningTree(Wire *W, int numWires, vector<vector<pair<int, int>>> &edges)
                 {
                     for (int k = 0; k < W[i].numPins; k++)
                     {
+                        //find the minimum cost to any pins that haven't already been selected
                         if (!sel[k] && Adj[j][k])
                         {
                             if (min > Adj[j][k])
@@ -256,7 +241,7 @@ int spanningTree(Wire *W, int numWires, vector<vector<pair<int, int>>> &edges)
                     }
                 }
             }
-            edges[i].push_back(make_pair(x, y));
+            edges[i].push_back(make_pair(x, y)); //Push the minimum cost edge
             sel[y] = true;
             numEdge++;
             count++;
@@ -285,6 +270,7 @@ void init(Point **points, Wire *W, int gridx, int gridy, int numWires, int numCe
         }
     }
     int x, y, np;
+
     //Set sinks and pins as obstructions
     for (int i = 0; i < numWires; i++)
     {
@@ -303,6 +289,7 @@ void init(Point **points, Wire *W, int gridx, int gridy, int numWires, int numCe
         }
     }
 
+    //Set cells as obstructions
     for (int i = 0; i < numCells; i++)
     {
         x = cells[i][0];
