@@ -8,7 +8,7 @@
 #include "common.h"
 
 #define MAX_SHM 1024
-#define EMPTY -1
+#define EMPTY -2
 #define TRUE 1
 #define FALSE 0
 
@@ -72,38 +72,31 @@ void leeMoore(
    frontier[index(dimy, x, y)] = false;
 
    //Set the source as the frontier, and its cost as 0
-   if(srcx - rLeft == x && srcy - rTop == y)
+   if(xg == srcx && yg == srcy)
    {
-      printf("%d - %d == %d | %d - %d == %d\n", srcx, rLeft, x, srcy, rTop, y);
       frontier[index(dimy, x, y)] = TRUE;
       costs[index(dimy, x, y)] = 0;
       tempCosts[index(dimy, x, y)] = 0;
    }
 
-   //FIXME: The sink is set as an obstruction!!
-   if(snkx - rLeft == x && snky - rTop == y)
-   {
-     printf("Sink reachable!\n");
-   }
-
    //Source to sink propagation
-   while(count++ < 10000)
+   while(!done)
    {
       if(frontier[index(dimy, x, y)])
       {
+         printf("%d\n", costs[index(dimy, x, y)]);
          frontier[index(dimy, x, y)] = FALSE;
          done = 1;
 
-         if(snkx - rLeft == x && snky - rTop == y)
+         if(xg == snkx && yg == snky)
          {
-            printf("Sink found!\n");
-            //done = 1;
+            printf("Sink found! Cost is: %d\n", costs[index(dimy, x, y)]);
          }
 
          //Assess top neighbour
          if(yg > rTop)
          {
-            if(graph[gridy * xg + (yg - 1)] == EMPTY || graph[gridy * xg + (yg - 1)] == ind) //Check for an obstruction
+            if(graph[gridy * xg + (yg - 1)] == EMPTY || graph[gridy * xg + (yg - 1)] == wire) //Check for an obstruction
             {
                cost = costs[index(dimy, x, y)] + 1;
                //We only want to replace the cost if it's lower
@@ -118,7 +111,7 @@ void leeMoore(
          //Assess bottom neighbour
          if(yg < rBottom)
          {
-            if(graph[gridy * xg + (yg + 1)] == EMPTY || graph[gridy * xg + (yg + 1)] == ind)
+            if(graph[gridy * xg + (yg + 1)] == EMPTY || graph[gridy * xg + (yg + 1)] == wire)
             {
                cost = costs[index(dimy, x, y)] + 1;
                if(cost < tempCosts[index(dimy, x, y + 1)])
@@ -132,7 +125,7 @@ void leeMoore(
          //Assess left neighbour
          if(xg < rRight)
          {
-            if(graph[gridy * (xg + 1) + yg] == EMPTY || graph[gridy * (xg + 1) + yg] == ind)
+            if(graph[gridy * (xg + 1) + yg] == EMPTY || graph[gridy * (xg + 1) + yg] == wire)
             {
                cost = costs[index(dimy, x, y)] + 1;
                if(cost < tempCosts[index(dimy, x + 1, y)])
@@ -146,7 +139,7 @@ void leeMoore(
          //Assess right neighbour
          if(xg > rLeft)
          {
-            if(graph[gridy * (xg - 1) + yg] == EMPTY || graph[gridy * (xg - 1) + yg] == ind)
+            if(graph[gridy * (xg - 1) + yg] == EMPTY || graph[gridy * (xg - 1) + yg] == wire)
             {
                cost = costs[index(dimy, x, y)] + 1;
                if(cost < tempCosts[index(dimy, x - 1, y)])
@@ -167,16 +160,14 @@ void leeMoore(
          done = 0;
       }
       tempCosts[index(dimy, x, y)] = costs[index(dimy, x, y)];
-
        __syncthreads();
    }
-   printf("%d\n", done);
 
    frontier[index(dimy, x, y)] = 0;
    done = 0;
 
    //Sink to source route tracing
-   if(snkx - rLeft == x && snky - rTop == y)
+   /*if(snkx - rLeft == x && snky - rTop == y)
    {
       frontier[index(dimy, x, y)] = 1;
    }
@@ -186,12 +177,16 @@ void leeMoore(
       {
          frontier[index(dimy, x, y)] = FALSE;
 
-         graph[gridy * xg + yg] = ind; //Obstruct this cell in the grid
+         graph[gridy * xg + yg] = wire; //Obstruct this cell in the grid
+         if(srcx - rLeft == x && srcy - rTop == y)
+         {
+            break;
+         }
          
          //Assess top neighbour
          if(y > 0)
          {
-            if(costs[index(dimy, x, y - 1)] < costs[index(dimy, x, y)])
+            if(costs[index(dimy, x, y - 1)] == costs[index(dimy, x, y)] - 1)
             {
                frontier[index(dimy, x, y - 1)] = 1;
                continue;
@@ -201,7 +196,7 @@ void leeMoore(
          //Assess bottom neighbour
          if(y < dimy)
          {
-            if(costs[index(dimy, x, y + 1)] < costs[index(dimy, x, y)])
+            if(costs[index(dimy, x, y + 1)] == costs[index(dimy, x, y)] - 1)
             {
                frontier[index(dimy, x, y + 1)] = 1;
                continue;
@@ -211,7 +206,7 @@ void leeMoore(
          //Assess left neighbour
          if(x < dimx)
          {
-            if(costs[index(dimy, x + 1, y)] < costs[index(dimy, x, y)])
+            if(costs[index(dimy, x + 1, y)] == costs[index(dimy, x, y)] - 1)
             {
                frontier[index(dimy, x + 1, y)] = 1;
                continue;
@@ -221,14 +216,14 @@ void leeMoore(
          //Assess right neighbour
          if(x > 0)
          {
-            if(costs[index(dimy, x - 1, y)] < costs[index(dimy, x, y)])
+            if(costs[index(dimy, x - 1, y)] == costs[index(dimy, x, y)] - 1)
             {
                frontier[index(dimy, x - 1, y)] = 1;
                continue;
             }
          }
       }
-   }
+   }*/
 }
 
 void schedule(
@@ -258,7 +253,7 @@ void schedule(
 
     for(unsigned int i = 0; i < 1/*routeList.size()*/; i++)
    {
-      ind = routeList[i];
+      int ind = routeList[i];
       for(unsigned int j = 0; j < 1/*edges[i].size()*/; j++)
       {
          srcx = W[ind].pins[edges[ind][j].first][0];
