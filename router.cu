@@ -39,6 +39,7 @@ void leeMoore(
    int rRight,
    int gridx, 
    int gridy,
+   int wire,
    int *graph
    //int *route
 )
@@ -46,11 +47,6 @@ void leeMoore(
    int bid = blockIdx.x;
    int x = threadIdx.x;
    int y = threadIdx.y;
-
-   /*int srcx = sourcex[bid];
-   int snkx = sinkx[bid];
-   int srcy = sourcey[bid];
-   int snky = sinky[bid];*/
 
    __shared__ int frontier[MAX_SHM];
    __shared__ int costs[MAX_SHM];
@@ -61,19 +57,6 @@ void leeMoore(
 
    int cost;
 
-   //Make sure the region isn't out of bounds of the grid
-   /*rRight = max(srcx, snkx) + 2;
-   rRight = rRight >= gridx ? (gridx - 1) : rRight; 
-
-   rLeft = min(srcx, snkx) - 2;
-   rLeft = rLeft < 0 ? 0 : rLeft;
-
-   rTop = min(srcy, nky) - 2;
-   rTop = rTop < 0 ? 0 : rTop;
-
-   rBottom = max(srcy, snky) + 2;
-   rBottom = rBotton >= gridy ? (gridy - 1) : rBottom;*/
-
    int xg, yg; //Locations on the graph for this thread to read data from 
    xg = rLeft + x;
    yg = rTop + y;
@@ -83,8 +66,6 @@ void leeMoore(
 
    done = 0; //FIXME: Don't think this will work!
    int count = 0;
-
-   //printf("%d\n", index(dimx, x, y));
    
    costs[index(dimy, x, y)] = 1000;
    tempCosts[index(dimy, x, y)] = 1E04;
@@ -105,18 +86,24 @@ void leeMoore(
      printf("Sink reachable!\n");
    }
 
+   //Source to sink propagation
    while(count++ < 10000)
    {
       if(frontier[index(dimy, x, y)])
       {
          frontier[index(dimy, x, y)] = FALSE;
+         done = 1;
 
-         
+         if(snkx - rLeft == x && snky - rTop == y)
+         {
+            printf("Sink found!\n");
+            //done = 1;
+         }
 
          //Assess top neighbour
          if(yg > rTop)
          {
-            if(graph[gridy * xg + (yg - 1)] == EMPTY) //Check for an obstruction
+            if(graph[gridy * xg + (yg - 1)] == EMPTY || graph[gridy * xg + (yg - 1)] == ind) //Check for an obstruction
             {
                cost = costs[index(dimy, x, y)] + 1;
                //We only want to replace the cost if it's lower
@@ -131,7 +118,7 @@ void leeMoore(
          //Assess bottom neighbour
          if(yg < rBottom)
          {
-            if(graph[gridy * xg + (yg + 1)] == EMPTY)
+            if(graph[gridy * xg + (yg + 1)] == EMPTY || graph[gridy * xg + (yg + 1)] == ind)
             {
                cost = costs[index(dimy, x, y)] + 1;
                if(cost < tempCosts[index(dimy, x, y + 1)])
@@ -145,7 +132,7 @@ void leeMoore(
          //Assess left neighbour
          if(xg < rRight)
          {
-            if(graph[gridy * (xg + 1) + yg] == EMPTY)
+            if(graph[gridy * (xg + 1) + yg] == EMPTY || graph[gridy * (xg + 1) + yg] == ind)
             {
                cost = costs[index(dimy, x, y)] + 1;
                if(cost < tempCosts[index(dimy, x + 1, y)])
@@ -159,7 +146,7 @@ void leeMoore(
          //Assess right neighbour
          if(xg > rLeft)
          {
-            if(graph[gridy * (xg - 1) + yg] == EMPTY)
+            if(graph[gridy * (xg - 1) + yg] == EMPTY || graph[gridy * (xg - 1) + yg] == ind)
             {
                cost = costs[index(dimy, x, y)] + 1;
                if(cost < tempCosts[index(dimy, x - 1, y)])
@@ -177,14 +164,71 @@ void leeMoore(
       {
          costs[index(dimy, x, y)] = tempCosts[index(dimy, x, y)];
          frontier[index(dimy, x, y)] = TRUE;
+         done = 0;
       }
       tempCosts[index(dimy, x, y)] = costs[index(dimy, x, y)];
 
        __syncthreads();
    }
+   printf("%d\n", done);
 
-   __syncthreads();
-   //printf("%d\n", done);
+   frontier[index(dimy, x, y)] = 0;
+   done = 0;
+
+   //Sink to source route tracing
+   if(snkx - rLeft == x && snky - rTop == y)
+   {
+      frontier[index(dimy, x, y)] = 1;
+   }
+   while(!done)
+   {
+      if(frontier[index(dimy, x, y)])
+      {
+         frontier[index(dimy, x, y)] = FALSE;
+
+         graph[gridy * xg + yg] = ind; //Obstruct this cell in the grid
+         
+         //Assess top neighbour
+         if(y > 0)
+         {
+            if(costs[index(dimy, x, y - 1)] < costs[index(dimy, x, y)])
+            {
+               frontier[index(dimy, x, y - 1)] = 1;
+               continue;
+            }
+         }
+
+         //Assess bottom neighbour
+         if(y < dimy)
+         {
+            if(costs[index(dimy, x, y + 1)] < costs[index(dimy, x, y)])
+            {
+               frontier[index(dimy, x, y + 1)] = 1;
+               continue;
+            }
+         }
+
+         //Assess left neighbour
+         if(x < dimx)
+         {
+            if(costs[index(dimy, x + 1, y)] < costs[index(dimy, x, y)])
+            {
+               frontier[index(dimy, x + 1, y)] = 1;
+               continue;
+            }
+         }
+
+         //Assess right neighbour
+         if(x > 0)
+         {
+            if(costs[index(dimy, x - 1, y)] < costs[index(dimy, x, y)])
+            {
+               frontier[index(dimy, x - 1, y)] = 1;
+               continue;
+            }
+         }
+      }
+   }
 }
 
 void schedule(
@@ -204,31 +248,6 @@ void schedule(
    
    gridToGraph(points, graph, gridx, gridy);
 
-  /* vector<int> sourcex;
-   vector<int> sourcey;
-   vector<int> sinkx;
-   vector<int> sinky;
-
-   int val;
-
-   for(unsigned int i = 0; i < routeList.size(); i++)
-   {
-      for(unsigned int j = 0; j < edges[i].size(); j++)
-      {
-         val = W[i].pins[edges[i].first][0];
-         sourcex.push_back(val);
-
-         val = W[i].pins[edges[i].second][0];
-         sinkx.push_back(val);
-
-         val = W[i].pins[edges[i].first][1];
-         sourcey.push_back(val);
-
-         val = W[i].pins[edges[i].second][1];
-         sinky.push_back(val);
-      }
-   }*/
-
    int srcx, srcy, snkx, snky;
 
    cudaStream_t *streams = (cudaStream_t *)malloc(numEdges * sizeof(cudaStream_t));
@@ -239,12 +258,13 @@ void schedule(
 
     for(unsigned int i = 0; i < 1/*routeList.size()*/; i++)
    {
+      ind = routeList[i];
       for(unsigned int j = 0; j < 1/*edges[i].size()*/; j++)
       {
-         srcx = W[i].pins[edges[i][j].first][0];
-         snkx = W[i].pins[edges[i][j].second][0];
-         srcy = W[i].pins[edges[i][j].first][1];
-         snky = W[i].pins[edges[i][j].second][1];
+         srcx = W[ind].pins[edges[ind][j].first][0];
+         snkx = W[ind].pins[edges[ind][j].second][0];
+         srcy = W[ind].pins[edges[ind][j].first][1];
+         snky = W[ind].pins[edges[ind][j].second][1];
 
          rRight = max(srcx, snkx) + 2;
          rRight = rRight >= gridx ? (gridx - 1) : rRight; 
@@ -272,33 +292,13 @@ void schedule(
          //TODO: Also need to return if the routing was successful
          leeMoore<<<1, dimBlock, 0, streams[s++]>>>(srcx, srcy, snkx, snky, 
                                                    rTop, rBottom, rLeft, rRight, 
-                                                   gridx, gridy, graph);
+                                                   gridx, gridy, ind, graph);
 
          gpuErrchk(cudaPeekAtLastError());
       }
    }
 
-   gpuErrchk(cudaDeviceSynchronize());
-
-   /*int *srcx = &sourcex[0];
-   int *srcy = &sourcey[0];
-   int *snkx = &sinkx[0];
-   int *snky = &snky[0];
-
-   
-   //Make sure the region isn't out of bounds of the grid
-   rRight = max(srcx, snkx) + 2;
-   rRight = rRight >= gridx ? (gridx - 1) : rRight; 
-
-   rLeft = min(srcx, snkx) - 2;
-   rLeft = rLeft < 0 ? 0 : rLeft;
-
-   rTop = min(srcy, nky) - 2;
-   rTop = rTop < 0 ? 0 : rTop;
-
-   rBottom = max(srcy, snky) + 2;
-   rBottom = rBotton >= gridy ? (gridy - 1) : rBottom;*/
-   
+   gpuErrchk(cudaDeviceSynchronize());   
 }
 
 void gridToGraph(Point **points, int *graph, int gridx, int gridy)
@@ -307,14 +307,7 @@ void gridToGraph(Point **points, int *graph, int gridx, int gridy)
    {
       for(int j = 0; j < gridy; j++)
       {
-         if(points[i][j].obstructed == true)
-         {
-            graph[gridy * i + j] = 0;
-         }
-         else
-         {
-            graph[gridy * i + j] = EMPTY;
-         }
+         graph[gridy * i + j] = points[i][j].obstructedBy;
       }
    }
 }
