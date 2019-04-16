@@ -34,9 +34,9 @@ struct Wire
     int numPins;
 
     int **pins;
-    int *found;
+    //int *found;
     //vector<vector<int>> pins;
-    //vector<int> found;
+    std::vector<int> found;
 
     int colour;
     int r, g, b;

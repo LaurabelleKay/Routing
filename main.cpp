@@ -68,7 +68,7 @@ int main(int argc, char **argv)
         W[i].g = rand() % 255;
         W[i].b = rand() % 255;
         W[i].pins = new int *[W[i].numPins];
-        W[i].found = new int[W[i].numPins];
+        W[i].found = vector<int>(W[i].numPins);
         for (int j = 0; j < W[i].numPins; j++)
         {
             W[i].pins[j] = new int[2];

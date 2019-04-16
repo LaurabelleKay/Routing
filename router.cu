@@ -129,7 +129,7 @@ void leeMoore(
 
          if(xg == snkx && yg == snky)
          {
-            printf("Sink found! Cost is: %d\n", costs[dimy * x + y]);
+            //printf("Sink found! Cost is: %d\n", costs[dimy * x + y]);
             foundSink = 1;
             done = 1;
             atomicAdd(&done, 1E06);
@@ -294,10 +294,14 @@ void schedule(
    int rTop; int rBottom; int rLeft; int rRight; //Region boundaries
    int s;
 
-   
+   vector<int> successful(numWires);
+   vector<int> unsuccessful;
+   vector<int> done(numWires);
 
    int numSuccessful = 0;
    int attempts = 0;
+   int *success;
+   int edgeIndex = 0;
 
    //Attempt to route all nets
    while(!routeList.empty())
@@ -305,11 +309,9 @@ void schedule(
       s = 0;
       cudaStream_t *streams = (cudaStream_t *)malloc(numEdges * sizeof(cudaStream_t)); 
 
-      int *success;
+      
       gpuErrchk(cudaMallocManaged(&success, numEdges * sizeof(int)));
-
-      int edgeIndex = 0;
-
+      edgeIndex = 0;
       for(unsigned int i = 0; i < routeList.size(); i++)
       {
          int ind = routeList[i];
@@ -342,9 +344,9 @@ void schedule(
             gpuErrchk(cudaStreamCreate(&(streams[s])));
             
             dim3 dimBlock(dimx, dimy);
-            printf("rTop: %d, rBottom: %d, rLeft: %d, rRight: %d\n", rTop, rBottom, rLeft, rRight);
-            printf("dx: %d, dy: %d\n", dimx, dimy);
-            printf("src: (%d, %d)  snk: (%d, %d)\n", srcx, srcy, snkx, snky);
+            //printf("rTop: %d, rBottom: %d, rLeft: %d, rRight: %d\n", rTop, rBottom, rLeft, rRight);
+            //printf("dx: %d, dy: %d\n", dimx, dimy);
+            //printf("src: (%d, %d)  snk: (%d, %d)\n", srcx, srcy, snkx, snky);
 
             leeMoore<<<1, dimBlock, 0, streams[s++]>>>(srcx, srcy, snkx, snky, 
                                                       rTop, rBottom, rLeft, rRight, 
@@ -369,29 +371,29 @@ void schedule(
       drawGrid(gridx, gridy, graph, W); 
       #endif
 
-      vector<int> successful(numWires);
-      vector<int> unsucessful;
-      vector<int> done(numWires);
-
       edgeIndex = 0;
       for(unsigned int i = 0; i < routeList.size(); i++)
       {
-         ind = routeList[i];
-         done[routeList[i]] = 1;
+         int ind = routeList[i];
+         done[ind] = 1;
          successful[i] = 1;
          for(unsigned int j = 0; j < edges[ind].size(); j++)
          {
+            //printf("success[%d] = %d\n", edgeIndex, success[edgeIndex]);
             if(success[edgeIndex] == 0)
             {
-               W[i].found[edges[ind][j].second] = -1; //The sink for this edge hasn't been found
+               W[ind].found[edges[ind][j].second] = -1; //The sink for this edge hasn't been found
+               printf("W[%d].found[%d] = -1\n", ind, edges[ind][j].second);
                successful[i] = 0; //If any edges are unsucessful, the wire was unsuccessful
-               unsuccessful.push_back(i);
-               edgeIndex++;
+               unsuccessful.push_back(ind);
+               
             }
+            edgeIndex++;
          }
       }
+      printf("\n");
 
-      free(success);
+      gpuErrchk(cudaFree(success));
 
       vector<vector< std::vector<int>::iterator >> its(dependencyList.size());
       std::vector<int>::iterator it;
@@ -406,7 +408,6 @@ void schedule(
             }
          }
       }
-
       
       for(unsigned int i = 0; i < dependencyList.size(); i++)
       {
@@ -416,7 +417,7 @@ void schedule(
          }
          dependencyList[i].erase(std::remove_if(dependencyList[i].begin(), dependencyList[i].end(), toDelete), dependencyList[i].end());
       }
-      
+
       routeList.clear();
       numEdges = 0;
 
@@ -425,20 +426,113 @@ void schedule(
       {
          if(dependencyList[i].empty() && done[i] != 1)
          {
-               routeList.push_back(i);
-               numEdges += edges[i].size();
-               count ++;
+            routeList.push_back(i);
+            numEdges += edges[i].size();
+            count ++;
          }
       }
-
-      printf("concurrent: %d\n", count);
    }
 
    if(numSuccessful != numWires)
    {
-      printf("Not all routed!");
+      printf("Not all routed!\n");
+      for(unsigned int i = 0; i < unsuccessful.size(); i++)
+      {
+         int ind = unsuccessful[i];
+         for(unsigned int j = 0; j < W[ind].found.size(); j++)
+         {
+            if(W[ind].found[j] == -1)
+            {
+               for(int k = 0; k < edges[ind].size(); k++)
+               {
+                  if(edges[ind][k].second == j)
+                  {
+                     //Get source and sinx coordinates for this edge
+                     srcx = W[ind].pins[edges[ind][k].first][0];
+                     snkx = W[ind].pins[edges[ind][k].second][0];
+                     srcy = W[ind].pins[edges[ind][k].first][1];
+                     snky = W[ind].pins[edges[ind][k].second][1];
+
+                     //Use the source and sink to create a search region
+                     rRight = max(srcx, snkx) + 2;
+                     rRight = rRight >= gridx ? (gridx - 1) : rRight; 
+
+                     rLeft = min(srcx, snkx) - 2;
+                     rLeft = rLeft < 0 ? 0 : rLeft;
+
+                     rTop = min(srcy, snky) - 2;
+                     rTop = rTop < 0 ? 0 : rTop;
+
+                     rBottom = max(srcy, snky) + 2;
+                     rBottom = rBottom >= gridy ? (gridy - 1) : rBottom;
+
+                     int blockingWire = expand(rTop, rBottom, rRight, rLeft, numWires, ind, graph, gridx, gridy);
+                     printf("Blocking wire for %d: %d\n", ind, blockingWire);
+                     ripUp(blockingWire, W[blockingWire].numPins, W[blockingWire].pins, graph, gridx, gridy);
+                  }
+               }
+            }
+         }
+      }
    }
+
+   #ifdef DISPLAY
+      drawGrid(gridx, gridy, graph, W); 
+      #endif
   
+}
+
+int expand(int rTop, int rBottom, int rRight, int rLeft, int numWires, int wireIndex, int *graph, int gridx, int gridy)
+{
+   vector<int> counter(numWires);
+   for(int i = rLeft; i < rRight; i++)
+   {
+      for(int j = rTop; j < rBottom; j++)
+      {
+         if(graph[gridy * i + j] >= 0)
+         {
+            counter[graph[gridy * i + j]] ++;
+         }
+      }
+   }
+
+   int max = -5;
+   int maxi = -1;
+   for(int i = 0; i < numWires; i++)
+   {
+      if(i != wireIndex && counter[i] > max)
+      {
+         max = counter[i];
+         maxi = i;
+      }
+   }
+   return maxi;
+}
+
+void ripUp(int wireIndex, int numPins, int **pins, int *graph, int gridx, int gridy)
+{
+
+   //Set any cells that are obstructed by that wire to empty
+   for(int i = 0; i < gridx; i++)
+   {
+      for(int j = 0; j < gridy; j++)
+      {
+         if(graph[gridy * i + j] == wireIndex)
+         {
+            graph[gridy * i + j] = EMPTY;
+         }
+      }
+   }
+
+   int x, y;
+
+   //Set the pins to be obstructed
+   for(int i = 0; i < numPins; i++)
+   {
+      x = pins[i][0];
+      y = pins[i][1];
+      graph[gridy * x + y] = wireIndex;
+   }
 }
 
 void gridToGraph(Point **points, int *graph, int gridx, int gridy)

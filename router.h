@@ -5,6 +5,8 @@
 using namespace::std;
 
 void gridToGraph(Point **points, int *graph, int gridx, int gridy);
+int expand(int rTop, int rBottom, int rRight, int rLeft, int numWires, int wireIndex, int *graph, int gridx, int gridy);
+void ripUp(int wireIndex, int numPins, int **pins, int *graph, int gridx, int gridy);
 void schedule(
     Point **points,
     Wire *W,
