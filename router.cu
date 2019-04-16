@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <vector>
 #include <algorithm>
+#include <queue>
 #include <cctype>
 
 #include "router.h"
@@ -267,6 +268,15 @@ void leeMoore(
    //TODO: Needs to return if the oruting was successful or not
 }
 
+bool overlap(BoundingBox a, BoundingBox b)
+{
+    if(a.minx < b.maxx && a.maxx > b.minx && a.miny < b.maxy && a.maxy > b.miny)
+    {
+        return true;
+    }
+    return false;
+}
+
 void schedule(
    Point **points, 
    Wire *W, 
@@ -297,9 +307,9 @@ void schedule(
    vector<int> successful(numWires);
    vector<int> unsuccessful;
    vector<int> done(numWires);
+   vector<int> reRoute;
 
    int numSuccessful = 0;
-   int attempts = 0;
    int *success;
    int edgeIndex = 0;
 
@@ -383,15 +393,14 @@ void schedule(
             if(success[edgeIndex] == 0)
             {
                W[ind].found[edges[ind][j].second] = -1; //The sink for this edge hasn't been found
-               printf("W[%d].found[%d] = -1\n", ind, edges[ind][j].second);
+               //printf("W[%d].found[%d] = -1\n", ind, edges[ind][j].second);
                successful[i] = 0; //If any edges are unsucessful, the wire was unsuccessful
                unsuccessful.push_back(ind);
-               
             }
             edgeIndex++;
          }
       }
-      printf("\n");
+      //printf("\n");
 
       gpuErrchk(cudaFree(success));
 
@@ -436,42 +445,29 @@ void schedule(
    if(numSuccessful != numWires)
    {
       printf("Not all routed!\n");
-      for(unsigned int i = 0; i < unsuccessful.size(); i++)
+      ripUpReroute(numWires, graph, gridx, gridy, unsuccessful, W, edges, reRoute, BB, dependencyList);
+      int count = 0;
+
+      dependencyList.clear();
+      dependencyList = vector<vector<int>>(reRoute.size());
+      BoundingBox B;
+      for(unsigned int i = 0; i < reRoute.size(); i++)
       {
-         int ind = unsuccessful[i];
-         for(unsigned int j = 0; j < W[ind].found.size(); j++)
+         if(reRoute[i] != -1)
          {
-            if(W[ind].found[j] == -1)
+            B = BB[reRoute[i]];
+            for(unsigned int j = 0; j < reRoute.size(); j++)
             {
-               for(int k = 0; k < edges[ind].size(); k++)
+               if(i != j && reRoute[j] != -1)
                {
-                  if(edges[ind][k].second == j)
+                  if(overlap(B, BB[j]))
                   {
-                     //Get source and sinx coordinates for this edge
-                     srcx = W[ind].pins[edges[ind][k].first][0];
-                     snkx = W[ind].pins[edges[ind][k].second][0];
-                     srcy = W[ind].pins[edges[ind][k].first][1];
-                     snky = W[ind].pins[edges[ind][k].second][1];
-
-                     //Use the source and sink to create a search region
-                     rRight = max(srcx, snkx) + 2;
-                     rRight = rRight >= gridx ? (gridx - 1) : rRight; 
-
-                     rLeft = min(srcx, snkx) - 2;
-                     rLeft = rLeft < 0 ? 0 : rLeft;
-
-                     rTop = min(srcy, snky) - 2;
-                     rTop = rTop < 0 ? 0 : rTop;
-
-                     rBottom = max(srcy, snky) + 2;
-                     rBottom = rBottom >= gridy ? (gridy - 1) : rBottom;
-
-                     int blockingWire = expand(rTop, rBottom, rRight, rLeft, numWires, ind, graph, gridx, gridy);
-                     printf("Blocking wire for %d: %d\n", ind, blockingWire);
-                     ripUp(blockingWire, W[blockingWire].numPins, W[blockingWire].pins, graph, gridx, gridy);
+                     dependencyList[i].push_back(i);
+                     printf("Dependency for %d is %d\n", i, j);
                   }
                }
             }
+            reRoute[i] = -1;
          }
       }
    }
@@ -480,6 +476,71 @@ void schedule(
       drawGrid(gridx, gridy, graph, W); 
       #endif
   
+}
+
+void ripUpReroute(
+   int numWires, 
+   int *graph,
+   int gridx,
+   int gridy,
+   vector<int> unsuccessful,
+   Wire *W,
+   vector<vector<pair<int, int>>> edges,
+   vector<int> &reRoute,
+   vector<BoundingBox> BB,
+   vector<vector<int>> &dependencyList
+)
+{
+   //vector<int> reRoute;
+   int rTop, rBottom, rLeft, rRight;
+   int srcx, srcy, snkx, snky;
+
+   for(unsigned int i = 0; i < unsuccessful.size(); i++)
+   {
+      int ind = unsuccessful[i];
+      for(unsigned int j = 0; j < W[ind].found.size(); j++)
+      {
+         if(W[ind].found[j] == -1)
+         {
+            for(int k = 0; k < edges[ind].size(); k++)
+            {
+               if(edges[ind][k].second == j)
+               {
+                  //Get source and sinx coordinates for this edge
+                  srcx = W[ind].pins[edges[ind][k].first][0];
+                  snkx = W[ind].pins[edges[ind][k].second][0];
+                  srcy = W[ind].pins[edges[ind][k].first][1];
+                  snky = W[ind].pins[edges[ind][k].second][1];
+
+                  //Use the source and sink to create a search region
+                  rRight = max(srcx, snkx) + 2;
+                  rRight = rRight >= gridx ? (gridx - 1) : rRight; 
+
+                  rLeft = min(srcx, snkx) - 2;
+                  rLeft = rLeft < 0 ? 0 : rLeft;
+
+                  rTop = min(srcy, snky) - 2;
+                  rTop = rTop < 0 ? 0 : rTop;
+
+                  rBottom = max(srcy, snky) + 2;
+                  rBottom = rBottom >= gridy ? (gridy - 1) : rBottom;
+
+                  int blockingWire = expand(rTop, rBottom, rRight, rLeft, numWires, ind, graph, gridx, gridy);
+                  printf("Blocking wire for %d: %d\n", ind, blockingWire);
+
+                  ripUp(blockingWire, W[blockingWire].numPins, W[blockingWire].pins, graph, gridx, gridy);
+                  reRoute.push_back(ind);
+
+                  if(blockingWire != -1)
+                  {
+                     ripUp(ind, W[ind].numPins, W[ind].pins, graph, gridx, gridy);
+                     reRoute.push_back(blockingWire);
+                  }   
+               }
+            }
+         }
+      }
+   }   
 }
 
 int expand(int rTop, int rBottom, int rRight, int rLeft, int numWires, int wireIndex, int *graph, int gridx, int gridy)
