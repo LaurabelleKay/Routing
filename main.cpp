@@ -28,7 +28,7 @@ int main(int argc, char **argv)
     if(argc < 2)
     {
         cout << "Invalid number of arguments: using default" << endl;
-        filename = "benchmarks/kuma.txt";
+        filename = "benchmarks/stanley.txt";
     }
     else
     {

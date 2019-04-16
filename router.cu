@@ -38,6 +38,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 
 bool toDelete(int n)
 {
+   printf("n: %d\n", n);
    return (n >= 4096);
 }
 
@@ -304,7 +305,7 @@ void schedule(
    int rTop; int rBottom; int rLeft; int rRight; //Region boundaries
    int s;
 
-   vector<int> successful(numWires);
+   vector<int> successful(numWires); //FIXME: Could just use an int in loop
    vector<int> unsuccessful;
    vector<int> done(numWires);
    vector<int> reRoute;
@@ -312,170 +313,208 @@ void schedule(
    int numSuccessful = 0;
    int *success;
    int edgeIndex = 0;
+   int attempts = 0;
+   int regionBoundary = 2;
 
-   //Attempt to route all nets
-   while(!routeList.empty())
+   while(numSuccessful < numWires && attempts < 5)
    {
-      s = 0;
-      cudaStream_t *streams = (cudaStream_t *)malloc(numEdges * sizeof(cudaStream_t)); 
-
-      
-      gpuErrchk(cudaMallocManaged(&success, numEdges * sizeof(int)));
-      edgeIndex = 0;
-      for(unsigned int i = 0; i < routeList.size(); i++)
+      attempts++;
+      regionBoundary = attempts > 1 ? regionBoundary * 4 : regionBoundary;
+       
+      while(!routeList.empty())
       {
-         int ind = routeList[i];
-         for(unsigned int j = 0; j < edges[ind].size(); j++)
+         s = 0;
+         cudaStream_t *streams = (cudaStream_t *)malloc(numEdges * sizeof(cudaStream_t)); 
+
+         gpuErrchk(cudaMallocManaged(&success, numEdges * sizeof(int)));
+
+         edgeIndex = 0;
+         for(unsigned int i = 0; i < routeList.size(); i++)
          {
-            
-            //Get source and sinx coordinates for this edge
-            srcx = W[ind].pins[edges[ind][j].first][0];
-            snkx = W[ind].pins[edges[ind][j].second][0];
-            srcy = W[ind].pins[edges[ind][j].first][1];
-            snky = W[ind].pins[edges[ind][j].second][1];
+            int ind = routeList[i];
+            printf("ind: %d\n", ind);
+            for(unsigned int j = 0; j < edges[ind].size(); j++)
+            {
+               
+               //Get source and sinx coordinates for this edge
+               srcx = W[ind].pins[edges[ind][j].first][0];
+               snkx = W[ind].pins[edges[ind][j].second][0];
+               srcy = W[ind].pins[edges[ind][j].first][1];
+               snky = W[ind].pins[edges[ind][j].second][1];
 
-            //Use the source and sink to create a search region
-            rRight = max(srcx, snkx) + 2;
-            rRight = rRight >= gridx ? (gridx - 1) : rRight; 
+               //Use the source and sink to create a search region
+               rRight = max(srcx, snkx) + regionBoundary;
+               rRight = rRight >= gridx ? (gridx - 1) : rRight; 
 
-            rLeft = min(srcx, snkx) - 2;
-            rLeft = rLeft < 0 ? 0 : rLeft;
+               rLeft = min(srcx, snkx) - regionBoundary;
+               rLeft = rLeft < 0 ? 0 : rLeft;
 
-            rTop = min(srcy, snky) - 2;
-            rTop = rTop < 0 ? 0 : rTop;
+               rTop = min(srcy, snky) - regionBoundary;
+               rTop = rTop < 0 ? 0 : rTop;
 
-            rBottom = max(srcy, snky) + 2;
-            rBottom = rBottom >= gridy ? (gridy - 1) : rBottom;
+               rBottom = max(srcy, snky) + regionBoundary;
+               rBottom = rBottom >= gridy ? (gridy - 1) : rBottom;
 
-            //Calculate block dimensions for the kernel base don region size
-            int dimx = rRight - rLeft;
-            int dimy = rBottom - rTop;
+               //Calculate block dimensions for the kernel base don region size
+               int dimx = rRight - rLeft;
+               int dimy = rBottom - rTop;
 
-            gpuErrchk(cudaStreamCreate(&(streams[s])));
-            
-            dim3 dimBlock(dimx, dimy);
-            //printf("rTop: %d, rBottom: %d, rLeft: %d, rRight: %d\n", rTop, rBottom, rLeft, rRight);
-            //printf("dx: %d, dy: %d\n", dimx, dimy);
-            //printf("src: (%d, %d)  snk: (%d, %d)\n", srcx, srcy, snkx, snky);
+               gpuErrchk(cudaStreamCreate(&(streams[s])));
+               
+               dim3 dimBlock(dimx, dimy);
+               //printf("rTop: %d, rBottom: %d, rLeft: %d, rRight: %d\n", rTop, rBottom, rLeft, rRight);
+               //printf("dx: %d, dy: %d\n", dimx, dimy);
+               //printf("src: (%d, %d)  snk: (%d, %d)\n", srcx, srcy, snkx, snky);
 
-            leeMoore<<<1, dimBlock, 0, streams[s++]>>>(srcx, srcy, snkx, snky, 
-                                                      rTop, rBottom, rLeft, rRight, 
-                                                      gridx, gridy, ind, 
-                                                      edgeIndex, success, graph);
+               leeMoore<<<1, dimBlock, 0, streams[s++]>>>(srcx, srcy, snkx, snky, 
+                                                         rTop, rBottom, rLeft, rRight, 
+                                                         gridx, gridy, ind, 
+                                                         edgeIndex, success, graph);
 
-            gpuErrchk(cudaPeekAtLastError());
-            edgeIndex++;
+               gpuErrchk(cudaPeekAtLastError());
+               edgeIndex++;
+            }
+         }
+
+         gpuErrchk(cudaDeviceSynchronize());  
+         
+         for(int i = 0; i < s; i++)
+         {
+            gpuErrchk(cudaStreamDestroy((streams[i])));
+         }
+
+         free(streams);
+         
+         #ifdef DISPLAY
+         drawGrid(gridx, gridy, graph, W); 
+         #endif
+         
+         edgeIndex = 0;
+         for(unsigned int i = 0; i < routeList.size(); i++)
+         {
+            int ind = routeList[i];
+            done[ind] = 1;
+            successful[ind] = 1;
+            for(unsigned int j = 0; j < edges[ind].size(); j++)
+            {
+
+               if(successful[ind] == 0)
+               {
+                  edgeIndex++; //Don't check any more edges, but we still need our index to increment
+                  continue;
+               }
+
+               if(success[edgeIndex] == 0)
+               {
+                  W[ind].found[edges[ind][j].second] = -1; //The sink for this edge hasn't been found
+                  successful[ind] = 0; //If any edges are unsucessful, the wire was unsuccessful
+                  unsuccessful.push_back(ind);
+               }
+
+               edgeIndex++;
+            }
+            if(successful[ind] == 1)
+            {
+               numSuccessful++;
+            }
+         }
+         
+         gpuErrchk(cudaFree(success));
+
+         vector<vector< std::vector<int>::iterator >> its(dependencyList.size());
+         std::vector<int>::iterator it;
+         for(unsigned int i = 0; i < dependencyList.size(); i++)
+         {
+            for(unsigned int j = 0; j < routeList.size(); j++)
+            {
+               it = std::find(dependencyList[i].begin(), dependencyList[i].end(), routeList[j]);
+               if(it != dependencyList[i].end())
+               {
+                  dependencyList[i][*it] = 4096;
+               }
+            }
+         }
+         
+         for(unsigned int i = 0; i < dependencyList.size(); i++)
+         {
+
+            if(dependencyList[i].empty())
+            {
+               continue;
+            }
+            dependencyList[i].erase(std::remove_if(dependencyList[i].begin(), dependencyList[i].end(), toDelete), dependencyList[i].end());
+         }
+
+         routeList.clear();
+         numEdges = 0;
+
+         int count = 0;
+         for(unsigned int i = 0; i < dependencyList.size(); i++)
+         {
+            if(dependencyList[i].empty() && done[i] != 1)
+            {
+               routeList.push_back(i);
+               numEdges += edges[i].size();
+               count ++;
+            }
          }
       }
 
-      gpuErrchk(cudaDeviceSynchronize());  
-
-      for(int i = 0; i < s; i++)
+      for(int i = 0; i < numWires; i++)
       {
-         gpuErrchk(cudaStreamDestroy((streams[i])));
+         done[i] = 0;
       }
+      if(numSuccessful != numWires)
+      {
+         
+         ripUpReroute(numWires, graph, gridx, gridy, unsuccessful, W, edges, reRoute, BB, dependencyList);
+         int count = 0;
 
-      free(streams);
+         dependencyList.clear();
+         dependencyList = vector<vector<int>>(reRoute.size());
+         BoundingBox B;
+         for(unsigned int i = 0; i < reRoute.size(); i++)
+         {
+            if(reRoute[i] != -1)
+            {
+               B = BB[reRoute[i]];
+               for(unsigned int j = 0; j < reRoute.size(); j++)
+               {
+                  if(i != j && reRoute[j] != -1)
+                  {
+                     if(overlap(B, BB[j]))
+                     {
+                        dependencyList[i].push_back(i);
+                     }
+                  }
+               }
+               reRoute[i] = -1;
+            }
+         }
+         
+         numEdges = 0;
+         routeList.clear();
+         for(int i = 0; i < numWires; i++)
+         {
+            if(dependencyList[i].empty())
+            {
+               routeList.push_back(i);
+               numEdges += edges[i].size();
+               count ++;
+            }
+         }
+         unsuccessful.clear();
+      }
 
       #ifdef DISPLAY
       drawGrid(gridx, gridy, graph, W); 
       #endif
 
-      edgeIndex = 0;
-      for(unsigned int i = 0; i < routeList.size(); i++)
-      {
-         int ind = routeList[i];
-         done[ind] = 1;
-         successful[i] = 1;
-         for(unsigned int j = 0; j < edges[ind].size(); j++)
-         {
-            //printf("success[%d] = %d\n", edgeIndex, success[edgeIndex]);
-            if(success[edgeIndex] == 0)
-            {
-               W[ind].found[edges[ind][j].second] = -1; //The sink for this edge hasn't been found
-               //printf("W[%d].found[%d] = -1\n", ind, edges[ind][j].second);
-               successful[i] = 0; //If any edges are unsucessful, the wire was unsuccessful
-               unsuccessful.push_back(ind);
-            }
-            edgeIndex++;
-         }
-      }
-      //printf("\n");
-
-      gpuErrchk(cudaFree(success));
-
-      vector<vector< std::vector<int>::iterator >> its(dependencyList.size());
-      std::vector<int>::iterator it;
-      for(unsigned int i = 0; i < dependencyList.size(); i++)
-      {
-         for(unsigned int j = 0; j < routeList.size(); j++)
-         {
-            it = std::find(dependencyList[i].begin(), dependencyList[i].end(), routeList[j]);
-            if(it != dependencyList[i].end())
-            {
-               dependencyList[i][*it] = 4096;
-            }
-         }
-      }
-      
-      for(unsigned int i = 0; i < dependencyList.size(); i++)
-      {
-         if(dependencyList[i].empty())
-         {
-            continue;
-         }
-         dependencyList[i].erase(std::remove_if(dependencyList[i].begin(), dependencyList[i].end(), toDelete), dependencyList[i].end());
-      }
-
-      routeList.clear();
-      numEdges = 0;
-
-      int count = 0;
-      for(unsigned int i = 0; i < dependencyList.size(); i++)
-      {
-         if(dependencyList[i].empty() && done[i] != 1)
-         {
-            routeList.push_back(i);
-            numEdges += edges[i].size();
-            count ++;
-         }
-      }
-   }
-
-   if(numSuccessful != numWires)
-   {
-      printf("Not all routed!\n");
-      ripUpReroute(numWires, graph, gridx, gridy, unsuccessful, W, edges, reRoute, BB, dependencyList);
-      int count = 0;
-
-      dependencyList.clear();
-      dependencyList = vector<vector<int>>(reRoute.size());
-      BoundingBox B;
-      for(unsigned int i = 0; i < reRoute.size(); i++)
-      {
-         if(reRoute[i] != -1)
-         {
-            B = BB[reRoute[i]];
-            for(unsigned int j = 0; j < reRoute.size(); j++)
-            {
-               if(i != j && reRoute[j] != -1)
-               {
-                  if(overlap(B, BB[j]))
-                  {
-                     dependencyList[i].push_back(i);
-                     printf("Dependency for %d is %d\n", i, j);
-                  }
-               }
-            }
-            reRoute[i] = -1;
-         }
-      }
    }
 
    #ifdef DISPLAY
       drawGrid(gridx, gridy, graph, W); 
-      #endif
-  
+   #endif
 }
 
 void ripUpReroute(
