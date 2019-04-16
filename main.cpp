@@ -10,7 +10,7 @@
 
 #include "main.h"
 #include "router.h"
-//#include "display.h"
+//
 
 using namespace std;
 
@@ -100,7 +100,7 @@ int main(int argc, char **argv)
 
     init(points, W, gridx, gridy, numWires, numCells, cells); //Initialise search space
 
-    //drawGrid(gridx, gridy, points, W);
+
 
     printf("Spanning Tree...\n");
 
