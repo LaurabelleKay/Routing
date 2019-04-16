@@ -6,7 +6,10 @@
 #include "device_launch_parameters.h"
 
 #include "common.h"
+
+#ifdef DISPLAY
 #include "display.h"
+#endif
 
 #define MAX_SHM 1024
 #define EMPTY -2
@@ -70,19 +73,6 @@ void leeMoore(
    int dimx = rRight - rLeft;
    int dimy = rBottom - rTop;
 
-   if(x == 0 && y == 0)
-   {
-      for(int i = 0; i < dimx; i++)
-      {
-         for(int j = 0; j < dimy; j++)
-         {
-            printf("%d\t", graph[gridy * (rLeft + i) + (rBottom - j)]);
-         }
-         printf("\n");
-      }
-   }
-   __syncthreads();
-
    //printf("[%d][%d] maps to [%d][%d]\n", x, y, xg, yg);
 
    done = 0; //FIXME: Don't think this will work!
@@ -100,24 +90,32 @@ void leeMoore(
 
    from1[dimy * (x + 1) + y] = -30;
    from2[dimy * (x + 1) + y] = -30;
+   if(x == 0 & y == 0)
+   {
+      printf("Wire: %d\n", wire);
+   }
+
+   int found;
 
    //Source to sink propagation
-   while(count++ < 50)
+   while(done < (dimx * dimy)/*count++ < 1000*/)
    {
       if(frontier[dimy * x + y] == TRUE)
       {
          frontier[dimy * x + y] = EXPANDED;
          //printf("[%d][%d]([%d][%d]) frontier expanded. Cost: %d\n", x, y, xg, yg, costs[dimy * x + y]);
          //printf("[%d][%d] from [%d][%d]\n", x, y, from1[dimy * x + y], from2[dimy * x + y]);
-         done = 1;
+         atomicAdd(&done, 1);
 
          if(xg == snkx && yg == snky)
          {
             printf("Sink found! Cost is: %d\n", costs[dimy * x + y]);
+            found = 1;
+            atomicAdd(&done, 1E06);
          }
 
          //Assess top neighbour
-         if(yg > 0)
+         if(y > 0)
          {
             if((graph[gridy * xg + (yg - 1)] == -2 || graph[gridy * xg + (yg - 1)] == wire) && frontier[dimy * x  + (y - 1)] != EXPANDED) //Check for an obstruction
             {
@@ -131,7 +129,7 @@ void leeMoore(
          }
 
          //Assess bottom neighbour
-         if(yg < dimy - 1)
+         if(y < dimy - 1)
          {
             if((graph[gridy * xg + (yg + 1)] == -2 || graph[gridy * xg + (yg + 1)] == wire) && frontier[dimy * x  + (y  + 1)] != EXPANDED)
             {
@@ -145,7 +143,7 @@ void leeMoore(
          }
 
          //Assess left neighbour
-         if(xg < dimx - 1)
+         if(x < dimx - 1)
          {
             if((graph[gridy * (xg + 1) + yg] == -2 || graph[gridy * (xg + 1) + yg] == wire) && frontier[dimy * (x + 1) + y] != EXPANDED)
             {
@@ -175,66 +173,77 @@ void leeMoore(
       }
       __syncthreads();
    }
-   done = 0;
-   //Sink to source route tracing
-   if(snkx - rLeft == x && snky - rTop == y)
+   if(x == 0 && y == 0)
    {
-      frontier[dimy * x + y] = 1;
+      printf("Done!\n");
    }
-   while(!done)
+   
+
+   done = 0;
+
+   //Sink to source route tracing
+   int xx, yy;
+   if(xg == snkx && yg == snky)
    {
-      if(frontier[dimy * x + y])
-      {
-         frontier[dimy * x + y] = FALSE;
-
-         graph[gridy * xg + yg] = wire; //Obstruct this cell in the grid
-         if(srcx - rLeft == x && srcy - rTop == y)
+      if(found == 1)
+      {    
+         xx = x;
+         yy = y;
+         int found = 0;
+         while(!found)
          {
-            done = 1;
-            break;
-         }
+            if( rLeft + xx == srcx && rTop + yy == srcy)
+            {
+               found = 1;
+               break;
+            }
          
-         //Assess top neighbour
-         if(y > 0)
-         {
-            if(costs[dimy * x  + (y - 1)] == costs[dimy * x + y] - 1)
-            {
-               frontier[dimy * x  + (y - 1)] = 1;
-               continue;
-            }
-         }
+            graph[gridy * (rLeft + xx) + (rTop + yy)] = wire;
 
-         //Assess bottom neighbour
-         if(y < dimy)
-         {
-            if(costs[dimy * x  + (y  + 1)] == costs[dimy * x + y] - 1)
+            //Assess top neighbour
+            if(yy > 0)
             {
-               frontier[dimy * x  + (y  + 1)] = 1;
-               continue;
+               if(costs[dimy * xx  + (yy - 1)] == costs[dimy * xx + yy] - 1)
+               {
+                  yy = yy - 1;
+                  continue;
+               }
             }
-         }
 
-         //Assess left neighbour
-         if(x < dimx)
-         {
-            if(costs[dimy * (x + 1) + y] == costs[dimy * x + y] - 1)
+            //Assess bottom neighbour
+            if(y < dimy)
             {
-               frontier[dimy * (x + 1) + y] = 1;
-               continue;
+               if(costs[dimy * xx  + (yy  + 1)] == costs[dimy * xx + yy] - 1)
+               {
+                  yy = yy + 1;
+                  continue;
+               }
             }
-         }
 
-         //Assess right neighbour
-         if(x > 0)
-         {
-            if(costs[dimy * (x - 1) + y] == costs[dimy * x + y] - 1)
+            //Assess left neighbour
+            if(x < dimx)
             {
-               frontier[dimy * (x - 1) + y] = 1;
-               continue;
+               if(costs[dimy * (xx + 1) + yy] == costs[dimy * xx + yy] - 1)
+               {
+                  xx = xx + 1;
+                  continue;
+               }
+            }
+
+            //Assess right neighbour
+            if(x > 0)
+            {
+               if(costs[dimy * (xx - 1) + yy] == costs[dimy * xx + yy] - 1)
+               {
+                  xx = xx - 1;
+                  continue;
+               }
             }
          }
       }
    }
+
+   //TODO: Needs to return if the oruting was successful or not
 }
 
 void schedule(
@@ -254,7 +263,9 @@ void schedule(
    
    gridToGraph(points, graph, gridx, gridy);
 
+   #ifdef DISPLAY
    drawGrid(gridx, gridy, graph, W);
+   #endif
 
    int srcx, srcy, snkx, snky;
 
@@ -264,11 +275,12 @@ void schedule(
 
    int s = 0;
 
-    for(unsigned int i = 0; i < 1/*routeList.size()*/; i++)
+    for(unsigned int i = 0; i < routeList.size(); i++)
    {
       int ind = routeList[i];
-      for(unsigned int j = 0; j < 1/*edges[i].size()*/; j++)
+      for(unsigned int j = 0; j < edges[ind].size(); j++)
       {
+         //j = 1;
          srcx = W[ind].pins[edges[ind][j].first][0];
          snkx = W[ind].pins[edges[ind][j].second][0];
          srcy = W[ind].pins[edges[ind][j].first][1];
@@ -296,8 +308,7 @@ void schedule(
          printf("dx: %d, dy: %d\n", dimx, dimy);
          printf("src: (%d, %d)  snk: (%d, %d)\n", srcx, srcy, snkx, snky);
 
-         //TODO: figure out how to store the route
-         //TODO: Also need to return if the routing was successful
+         //TODO: Need to return if the routing was successful
          leeMoore<<<1, dimBlock, 0, streams[s++]>>>(srcx, srcy, snkx, snky, 
                                                    rTop, rBottom, rLeft, rRight, 
                                                    gridx, gridy, ind, graph);
@@ -307,7 +318,15 @@ void schedule(
    }
 
    gpuErrchk(cudaDeviceSynchronize());  
+   
+   //Put successful in list
+   //Put unsucessful in list
+   //Search dependency list and remove parent
+   //Create new order
+
+   #ifdef DISPLAY
    drawGrid(gridx, gridy, graph, W); 
+   #endif
 }
 
 void gridToGraph(Point **points, int *graph, int gridx, int gridy)
