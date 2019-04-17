@@ -270,7 +270,8 @@ void leeMoore(
 
 bool overlap(BoundingBox a, BoundingBox b)
 {
-    if(a.minx < b.maxx && a.maxx > b.minx && a.miny < b.maxy && a.maxy > b.miny)
+    if((a.minx - 5) < (b.maxx + 5) && (a.maxx + 5) > (b.minx - 5)
+     && (a.miny - 5) < (b.maxy + 5) && (a.maxy + 5) > (b.miny - 5))
     {
         return true;
     }
@@ -291,7 +292,6 @@ void schedule(
 {
    int *graph;
 
-   //TODO: Work out texture memory stuff if there's time
    gpuErrchk(cudaMallocManaged(&graph, gridx * gridy * sizeof(int)));
    
    gridToGraph(points, graph, gridx, gridy);
@@ -304,7 +304,8 @@ void schedule(
    int rTop; int rBottom; int rLeft; int rRight; //Region boundaries
    int s;
 
-   vector<int> successful(numWires); //FIXME: Could just use an int in loop
+   vector<pair<int, int>> cpuRoute; //Store any nets than need to be routed on the cpu
+   vector<int> successful(numWires); 
    vector<int> unsuccessful;
    vector<int> done(numWires);
    vector<int> reRoute;
@@ -315,7 +316,7 @@ void schedule(
    int attempts = 0;
    int regionBoundary = 2;
 
-   while(numSuccessful < numWires && attempts < 5)
+   while(numSuccessful < numWires && attempts < 1)
    {
       attempts++;
       //regionBoundary = attempts > 1 ? regionBoundary * 2 : regionBoundary;
@@ -323,7 +324,6 @@ void schedule(
       while(!routeList.empty())
       {
          s = 0;
-         printf("numEdges: %d\n", numEdges);
          cudaStream_t *streams = (cudaStream_t *)malloc(numEdges * sizeof(cudaStream_t)); 
          gpuErrchk(cudaMallocManaged(&success, numEdges * sizeof(int)));
 
@@ -331,9 +331,10 @@ void schedule(
          for(unsigned int i = 0; i < routeList.size(); i++)
          {
             int ind = routeList[i];
+            int area = BB[ind].area;
+
             for(unsigned int j = 0; j < edges[ind].size(); j++)
             {
-               
                //Get source and sinx coordinates for this edge
                srcx = W[ind].pins[edges[ind][j].first][0];
                snkx = W[ind].pins[edges[ind][j].second][0];
@@ -341,17 +342,17 @@ void schedule(
                snky = W[ind].pins[edges[ind][j].second][1];
 
                //Use the source and sink to create a search region
-               rRight = max(srcx, snkx) + regionBoundary;
-               rRight = rRight >= gridx ? (gridx - 1) : rRight; 
+               rRight = BB[ind].maxx + 5;
+               rRight = rRight > gridx ? gridx - 1 : rRight;
 
-               rLeft = min(srcx, snkx) - regionBoundary;
+               rLeft = BB[ind].minx - 5;
                rLeft = rLeft < 0 ? 0 : rLeft;
 
-               rTop = min(srcy, snky) - regionBoundary;
+               rTop = BB[ind].miny - 5;
                rTop = rTop < 0 ? 0 : rTop;
 
-               rBottom = max(srcy, snky) + regionBoundary;
-               rBottom = rBottom >= gridy ? (gridy - 1) : rBottom;
+               rBottom = BB[ind].maxy + 5;
+               rBottom = rBottom > gridy ? gridy - 1 : rBottom;
 
                //Calculate block dimensions for the kernel base don region size
                int dimx = rRight - rLeft;
@@ -360,21 +361,56 @@ void schedule(
                gpuErrchk(cudaStreamCreate(&(streams[s])));
                
                dim3 dimBlock(dimx, dimy);
-               //printf("rTop: %d, rBottom: %d, rLeft: %d, rRight: %d\n", rTop, rBottom, rLeft, rRight);
-               printf("dx: %d, dy: %d\n", dimx, dimy);
-               //printf("src: (%d, %d)  snk: (%d, %d)\n", srcx, srcy, snkx, snky);
-
-               leeMoore<<<1, dimBlock, 0, streams[s++]>>>(srcx, srcy, snkx, snky, 
+               if(dimx * dimy <= 1024)
+               {
+                  leeMoore<<<1, dimBlock, 0, streams[s++]>>>(srcx, srcy, snkx, snky, 
                                                          rTop, rBottom, rLeft, rRight, 
                                                          gridx, gridy, ind, 
                                                          edgeIndex, success, graph);
-
-               gpuErrchk(cudaPeekAtLastError());
+                  gpuErrchk(cudaPeekAtLastError());
+               }
+               else
+               {
+                  cpuRoute.push_back(make_pair(ind, edgeIndex));
+               }
                edgeIndex++;
             }
          }
 
-         gpuErrchk(cudaDeviceSynchronize());  
+        gpuErrchk(cudaDeviceSynchronize()); 
+
+         for(unsigned int i = 0; i < cpuRoute.size(); i++)
+         {
+            int ind = cpuRoute[i].first;
+            edgeIndex = cpuRoute[i].second;
+            
+               srcx = W[ind].pins[edges[ind][i].first][0];
+               snkx = W[ind].pins[edges[ind][i].second][0];
+               srcy = W[ind].pins[edges[ind][i].first][1];
+               snky = W[ind].pins[edges[ind][i].second][1];
+
+               rRight = BB[ind].maxx + 5;
+               rRight = rRight > gridx ? gridx - 1 : rRight;
+
+               rLeft = BB[ind].minx - 5;
+               rLeft = rLeft < 0 ? 0 : rLeft;
+
+               rTop = BB[ind].miny - 5;
+               rTop = rTop < 0 ? 0 : rTop;
+
+               rBottom = BB[ind].maxy + 5;
+               rBottom = rBottom > gridy ? gridy - 1 : rBottom;
+
+               int dimx = rRight - rLeft;
+               int dimy = rBottom - rTop;
+
+               int ret  = LM(graph, gridx, gridy, rTop, rBottom, rRight, rLeft, srcx, srcy, snkx, snky, ind, edgeIndex);
+               success[edgeIndex] = ret;
+
+               //CPU Route
+            
+         }
+         cpuRoute.clear();
          
          for(int i = 0; i < s; i++)
          {
@@ -382,10 +418,6 @@ void schedule(
          }
 
          free(streams);
-         
-         #ifdef DISPLAY
-         drawGrid(gridx, gridy, graph, W); 
-         #endif
          
          edgeIndex = 0;
          for(unsigned int i = 0; i < routeList.size(); i++)
@@ -430,7 +462,6 @@ void schedule(
          
          for(unsigned int i = 0; i < dependencyList.size(); i++)
          {
-
             if(dependencyList[i].empty())
             {
                continue;
@@ -456,8 +487,9 @@ void schedule(
             }
          }
       }
+      printf("numSuccessful: %d\n", numSuccessful);
 
-      numSuccessful = 0;
+     /* numSuccessful = 0;
       for(int i = 0; i < numWires; i++)
       {
          done[i] = 0;
@@ -507,7 +539,7 @@ void schedule(
             }
          }
          unsuccessful.clear();
-      }
+      }*/
       
 
       #ifdef DISPLAY
@@ -519,6 +551,186 @@ void schedule(
    #ifdef DISPLAY
       drawGrid(gridx, gridy, graph, W); 
    #endif
+}
+
+int LM(
+   int *graph,
+   int gridx,
+   int gridy,
+   int rTop,
+   int rBottom,
+   int rRight,
+   int rLeft,
+   int srcx,
+   int srcy,
+   int snkx,
+   int snky, 
+   int wire,
+   int edgeIndex
+)
+{
+   vector<vector<int>> frontier(gridx);
+   {
+      for(int i = 0; i < gridx; i++)
+      {
+         frontier[i] = vector<int>(gridy);
+      }
+   }
+
+   vector<vector<int>> costs(gridx);
+   for(int i = 0; i < gridx; i++)
+   {
+      costs[i] = vector<int>(gridy, 1E06);
+   }
+
+   vector<vector<pair<int, int>>> from(gridx);
+   for(int i = 0; i < gridy; i++)
+   {
+
+   }
+
+   int done;
+   int foundSink = 0;
+   int count = 0;
+
+   queue<pair<int, int>> Q;
+
+   Q.push(make_pair(srcx, srcy));
+   printf("rt: %d, rb %d, rl %d, rr %d\n", rTop, rBottom, rLeft, rRight);
+
+   costs[srcx][srcy] = 0;
+   frontier[srcx][srcy] = 1;
+
+   int x, y;
+
+   pair<int, int> current;
+
+   while(!Q.empty())
+   {
+      current = Q.front();
+      x = current.first;
+      y = current.second;
+
+      if(x == snkx && y == snky)
+      {
+         foundSink = 1;
+         break;
+      }
+
+      //Assess top neighbour
+      if(y > rTop)
+      {
+         if((graph[gridy * x + (y - 1)] == -2 || graph[gridy * x + (y - 1)] == wire) && frontier[x][y - 1] != 1)
+         {
+            costs[x][y - 1] = costs[x][y] + 1;
+            frontier[x][y - 1] = 1;
+            Q.push(make_pair(x, y - 1));
+         }
+      }
+
+      if(y < rBottom - 1)
+      {
+         if((graph[gridy * x + (y + 1)] == -2 || graph[gridy * x + (y + 1)] == wire) && frontier[x][y + 1] != 1)
+         {
+            costs[x][y + 1] = costs[x][y] + 1;
+            frontier[x][y + 1] = 1;
+            Q.push(make_pair(x, y + 1));
+         }
+      }
+
+      if(x > rLeft)
+      {
+         if((graph[gridy * (x - 1) + y] == -2 || graph[gridy * (x - 1) + y] == wire) && frontier[x - 1][y] != 1)
+         {
+            costs[x - 1][y] = costs[x][y] + 1;
+            frontier[x - 1][y] = 1;
+            Q.push(make_pair(x - 1, y));
+         }
+      }
+
+      if(x < rRight - 1)
+      {
+         if((graph[gridy * (x + 1) + y] == -2 || graph[gridy * (x + 1) + y] == wire) && frontier[x + 1][y] != 1)
+         {
+            costs[x + 1][y] = costs[x][y] + 1;
+            frontier[x + 1][y] = 1;
+            Q.push(make_pair(x + 1, y));
+         }
+      }
+      Q.pop();
+   }
+
+   while(!Q.empty())
+   {
+      Q.pop();
+   }
+
+   int success = 0;
+
+   for(int i = 0; i < gridx; i++)
+   {
+        for(int j = 0; j < gridy; j++)
+        {
+           frontier[i][j] = 0;
+        }
+   }
+
+   if(foundSink == 1)
+   {
+      success = 1;
+      x = snkx;
+      y = snky;
+      int found = 0;
+      while(!found)
+      {
+         //printf("%d, %d\n", x, y);
+         if(x == srcx && y == srcy)
+         {
+            found = 1;
+            break;
+         }
+
+         graph[gridy * x + y] = wire;
+
+         if(y > rTop)
+         {
+            if(costs[x][y - 1] == costs[x][y] - 1)
+            {
+               y = y - 1;
+               continue;
+            }
+         }
+
+         if(y < rBottom)
+         {
+            if(costs[x][y + 1] == costs[x][y] - 1)
+            {
+               y = y + 1;
+               continue;
+            }
+         }
+
+         if(x > rLeft)
+         {
+            if(costs[x - 1][y] == costs[x][y] - 1)
+            {
+               x = x - 1;
+               continue;
+            }
+         }
+
+         if(x < rRight)
+         {
+            if(costs[x + 1][y] == costs[x][y] - 1)
+            {
+               x = x + 1;
+               continue;
+            }
+         }
+      }
+
+   }
+   return success;
 }
 
 void ripUpReroute(

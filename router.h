@@ -2,7 +2,7 @@
 #define R_H
 
 #include "common.h"
-using namespace::std;
+using namespace ::std;
 
 void gridToGraph(Point **points, int *graph, int gridx, int gridy);
 void ripUpReroute(
@@ -17,6 +17,22 @@ void ripUpReroute(
     vector<BoundingBox> BB,
     vector<vector<int>> &dependencyList,
     int *numSuccessful);
+
+int LM(
+    int *graph,
+    int gridx,
+    int gridy,
+    int rTop,
+    int rBottom,
+    int rRight,
+    int rLeft,
+    int srcx,
+    int srcy,
+    int snkx,
+    int snky,
+    int wire,
+    int edgeIndex);
+
 int expand(int rTop, int rBottom, int rRight, int rLeft, int numWires, int wireIndex, int *graph, int gridx, int gridy);
 void ripUp(int wireIndex, int numPins, int **pins, int *graph, int gridx, int gridy);
 void schedule(

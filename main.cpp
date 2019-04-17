@@ -129,8 +129,6 @@ int main(int argc, char **argv)
             count ++;
         }
     }
-
-    printf("Concurrent: %d\n", count);
    
     schedule(points, W, edges, dependencyList, routeList, BB, gridx, gridy, numEdges, numWires);
 
@@ -140,7 +138,8 @@ int main(int argc, char **argv)
 //Determines if 2 bounding boxes overlap by comparing the edges
 bool hasOverlap(BoundingBox a, BoundingBox b)
 {
-    if(a.minx < b.maxx && a.maxx > b.minx && a.miny < b.maxy && a.maxy > b.miny)
+    if((a.minx - 5) < (b.maxx + 5) && (a.maxx + 5) > (b.minx - 5)
+     && (a.miny - 5) < (b.maxy + 5) && (a.maxy + 5) > (b.miny - 5))
     {
         return true;
     }
