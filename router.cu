@@ -316,7 +316,7 @@ void schedule(
    int attempts = 0;
    int regionBoundary = 2;
 
-   while(numSuccessful < numWires && attempts < 1)
+   while(numSuccessful < numWires && attempts < 2)
    {
       attempts++;
       //regionBoundary = attempts > 1 ? regionBoundary * 2 : regionBoundary;
@@ -487,9 +487,8 @@ void schedule(
             }
          }
       }
-      printf("numSuccessful: %d\n", numSuccessful);
 
-     /* numSuccessful = 0;
+      numSuccessful = 0;
       for(int i = 0; i < numWires; i++)
       {
          done[i] = 0;
@@ -500,6 +499,7 @@ void schedule(
       }
 
       printf("successful: %d\n", numSuccessful);
+
       if(numSuccessful != numWires)
       {
          ripUpReroute(numWires, graph, gridx, gridy, unsuccessful, W, edges, reRoute, BB, dependencyList, &numSuccessful);
@@ -539,11 +539,10 @@ void schedule(
             }
          }
          unsuccessful.clear();
-      }*/
+      }
       
-
       #ifdef DISPLAY
-      drawGrid(gridx, gridy, graph, W); 
+      //drawGrid(gridx, gridy, graph, W); 
       #endif
    }
 
