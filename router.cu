@@ -21,7 +21,6 @@
 #define EXPANDED -1
 #define MAX_ATTEMPTS 10
 
-//#define index(k, i, j) ((k) * (i) + (j))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 
@@ -57,21 +56,14 @@ void leeMoore(
    int edgeIndex,
    int *success,
    int *graph
-   //int *route
 )
 {
-   int bid = blockIdx.x;
    int x = threadIdx.x;
    int y = threadIdx.y;
 
    __shared__ int frontier[MAX_SHM];
    __shared__ int costs[MAX_SHM];
-   //__shared__ int tempCosts[MAX_SHM];
-   __shared__ int from1[MAX_SHM];
-   __shared__ int from2[MAX_SHM];
    __shared__ int done;
-
-   //int rTop, int rBottom, int rLeft, int rRight; //Region boundaries
 
    int cost;
 
@@ -79,14 +71,10 @@ void leeMoore(
    xg = rLeft + x;
    yg = rTop + y;
 
-   //printf("[%d][%d] = %d\n", xg, yg, graph[gridy * xg + yg]);
-
    int dimx = rRight - rLeft;
    int dimy = rBottom - rTop;
 
-   //printf("[%d][%d] maps to [%d][%d]\n", x, y, xg, yg);
-
-   done = 0; //FIXME: Don't think this will work!
+   done = 0; 
    int count = 0;
    
    costs[dimy * x + y] = 1000;
@@ -99,8 +87,6 @@ void leeMoore(
       costs[dimy * x + y] = 0;
    }
 
-   from1[dimy * (x + 1) + y] = -30;
-   from2[dimy * (x + 1) + y] = -30;
    if(x == 0 & y == 0)
    {
       success[edgeIndex] = 0;
@@ -124,30 +110,23 @@ void leeMoore(
       if(frontier[dimy * x + y] == TRUE)
       {
          frontier[dimy * x + y] = EXPANDED;
-         //printf("[%d][%d]([%d][%d]) frontier expanded. Cost: %d\n", x, y, xg, yg, costs[dimy * x + y]);
-         //printf("[%d][%d] from [%d][%d]\n", x, y, from1[dimy * x + y], from2[dimy * x + y]);
-         //atomicAdd(&done, 1);
 
          if(xg == snkx && yg == snky)
          {
-            //printf("Sink found! Cost is: %d\n", costs[dimy * x + y]);
             foundSink = 1;
             done = 1;
             atomicAdd(&done, 1E06);
-            //printf("Done is now: %d\n", done);
          }
 
          //Assess top neighbour
          if(y > 0)
          {
+            //If the area is not obsructed, or is just obstructed by the same wire and it hasn't already been expanded, expand this area
             if((graph[gridy * xg + (yg - 1)] == -2 || graph[gridy * xg + (yg - 1)] == wire) && frontier[dimy * x  + (y - 1)] != EXPANDED) //Check for an obstruction
             {
                cost = costs[dimy * x + y] + 1;
                costs[dimy * x  + (y - 1)] = cost;
                frontier[dimy * x  + (y - 1)] = TRUE;
-               from1[dimy * x  + (y - 1)] = x;
-               from2[dimy * x  + (y - 1)] = y;
-               //printf("[%d][%d]([%d][%d]) expands [%d][%d]([%d][%d])\n", x, y, xg, yg, x, y - 1, xg, yg - 1);
             }
          }
 
@@ -159,9 +138,6 @@ void leeMoore(
                cost = costs[dimy * x + y] + 1;
                costs[dimy * x  + (y  + 1)] = cost;
                frontier[dimy * x  + (y  + 1)] = TRUE;
-               from1[dimy * x  + (y  + 1)] = x;
-               from2[dimy * x  + (y  + 1)] = y;
-               //printf("[%d][%d]([%d][%d]) expands [%d][%d]([%d][%d])\n", x, y, xg, yg, x, y + 1, xg, yg + 1);
             }
          }
 
@@ -173,9 +149,6 @@ void leeMoore(
                cost = costs[dimy * x + y] + 1;
                costs[dimy * (x + 1) + y] = cost;
                frontier[dimy * (x + 1) + y] = TRUE;
-               from1[dimy * (x + 1) + y] = x;
-               from2[dimy * (x + 1) + y] = y;
-               //printf("[%d][%d]([%d][%d]) expands [%d][%d]([%d][%d])\n", x, y, xg, yg, x + 1, y, xg + 1, yg);
             }  
          }
 
@@ -187,9 +160,6 @@ void leeMoore(
                cost = costs[dimy * x + y] + 1;
                costs[dimy * (x - 1) + y] = cost;
                frontier[dimy * (x - 1) + y] = TRUE;
-               from1[dimy * (x - 1) + y] = x;
-               from2[dimy * (x - 1) + y] = y;
-               //printf("[%d][%d]([%d][%d]) expands [%d][%d]([%d][%d])\n", x, y, xg, yg, x - 1, y, xg - 1, yg);
             }
          }
 
@@ -198,10 +168,9 @@ void leeMoore(
 
    __syncthreads();
 
-   //return;
    done = 0;
 
-   //Sink to source route tracing
+   //Sink to source route tracing, only the sink thread performs this
    int xx, yy;
    if(xg == snkx && yg == snky)
    { 
@@ -224,6 +193,7 @@ void leeMoore(
             //Assess top neighbour
             if(yy > 0)
             {
+               //If they're 1 cost lower, go in that direction
                if(costs[dimy * xx  + (yy - 1)] == costs[dimy * xx + yy] - 1)
                {
                   yy = yy - 1;
@@ -264,8 +234,6 @@ void leeMoore(
       }
    }
    __syncthreads();
-   //printf("All here?\n");
-   //TODO: Needs to return if the oruting was successful or not
 }
 
 bool overlap(BoundingBox a, BoundingBox b)
@@ -314,12 +282,10 @@ void schedule(
    int *success;
    int edgeIndex = 0;
    int attempts = 0;
-   int regionBoundary = 2;
 
    while(numSuccessful < numWires && attempts < 2)
    {
       attempts++;
-      //regionBoundary = attempts > 1 ? regionBoundary * 2 : regionBoundary;
        
       while(!routeList.empty())
       {
@@ -361,6 +327,8 @@ void schedule(
                gpuErrchk(cudaStreamCreate(&(streams[s])));
                
                dim3 dimBlock(dimx, dimy);
+
+               //Launch the kernel only if hte region will fit
                if(dimx * dimy <= 1024)
                {
                   leeMoore<<<1, dimBlock, 0, streams[s++]>>>(srcx, srcy, snkx, snky, 
@@ -371,14 +339,15 @@ void schedule(
                }
                else
                {
-                  cpuRoute.push_back(make_pair(ind, edgeIndex));
+                  cpuRoute.push_back(make_pair(ind, edgeIndex)); //Add to CPU's list otherwise
                }
                edgeIndex++;
             }
          }
 
-        gpuErrchk(cudaDeviceSynchronize()); 
+        gpuErrchk(cudaDeviceSynchronize()); //Wait for all kernels to finish
 
+        //Get the CPU to route the large ones
          for(unsigned int i = 0; i < cpuRoute.size(); i++)
          {
             int ind = cpuRoute[i].first;
@@ -401,14 +370,8 @@ void schedule(
                rBottom = BB[ind].maxy + 5;
                rBottom = rBottom > gridy ? gridy - 1 : rBottom;
 
-               int dimx = rRight - rLeft;
-               int dimy = rBottom - rTop;
-
                int ret  = LM(graph, gridx, gridy, rTop, rBottom, rRight, rLeft, srcx, srcy, snkx, snky, ind, edgeIndex);
-               success[edgeIndex] = ret;
-
-               //CPU Route
-            
+               success[edgeIndex] = ret;            
          }
          cpuRoute.clear();
          
@@ -420,6 +383,8 @@ void schedule(
          free(streams);
          
          edgeIndex = 0;
+
+         //Determine which edges were successful (and therefore which net)
          for(unsigned int i = 0; i < routeList.size(); i++)
          {
             int ind = routeList[i];
@@ -445,12 +410,14 @@ void schedule(
          
          gpuErrchk(cudaFree(success));
 
+
          vector<vector< std::vector<int>::iterator >> its(dependencyList.size());
          std::vector<int>::iterator it;
          for(unsigned int i = 0; i < dependencyList.size(); i++)
          {
             for(unsigned int j = 0; j < routeList.size(); j++)
             {
+               //Find the routed wires in i's dependency list, if they are present, they can be removed since they're done
                it = std::find(dependencyList[i].begin(), dependencyList[i].end(), routeList[j]);
                if(it != dependencyList[i].end())
                {
@@ -460,6 +427,7 @@ void schedule(
             }
          }
          
+         //Remove the routed wires from the dependency lists
          for(unsigned int i = 0; i < dependencyList.size(); i++)
          {
             if(dependencyList[i].empty())
@@ -473,6 +441,8 @@ void schedule(
          numEdges = 0;
 
          int count = 0;
+
+         //Create a new routing list with the new dependency list
          for(unsigned int i = 0; i < dependencyList.size(); i++)
          {
             if(dependencyList[i].empty() && done[i] != 1)
@@ -486,8 +456,14 @@ void schedule(
                count ++;
             }
          }
+
+      #ifdef DISPLAY
+      drawGrid(gridx, gridy, graph, W); 
+      #endif
+
       }
 
+      //Count the total number of successful routes
       numSuccessful = 0;
       for(int i = 0; i < numWires; i++)
       {
@@ -498,16 +474,18 @@ void schedule(
          }
       }
 
-      printf("successful: %d\n", numSuccessful);
-
+      //If not all were successful
       if(numSuccessful != numWires)
       {
+         //Do the rip up and get the new list of to-be-routed nets
          ripUpReroute(numWires, graph, gridx, gridy, unsuccessful, W, edges, reRoute, BB, dependencyList, &numSuccessful);
          int count = 0;
 
          dependencyList.clear();
          dependencyList = vector<vector<int>>(reRoute.size());
          BoundingBox B;
+
+         //Create dependencies based on this new routing order
          for(unsigned int i = 0; i < reRoute.size(); i++)
          {
             if(reRoute[i] != -1)
@@ -529,6 +507,7 @@ void schedule(
          
          numEdges = 0;
          routeList.clear();
+         //Find the nets that can be routed concurrenlty and put them in the routing list
          for(int i = 0; i < numWires; i++)
          {
             if(dependencyList[i].empty())
@@ -542,16 +521,97 @@ void schedule(
       }
       
       #ifdef DISPLAY
-      //drawGrid(gridx, gridy, graph, W); 
+      drawGrid(gridx, gridy, graph, W); 
       #endif
    }
 
-   printf("Total attempts: %d\n", attempts);
    #ifdef DISPLAY
       drawGrid(gridx, gridy, graph, W); 
    #endif
 }
 
+//For timing
+void sequentialSchedule(
+   Point **points, 
+   Wire *W, 
+   vector<vector<pair<int,int>>>edges,
+   vector<vector<int>> dependencyList,
+   vector<int> routeList,
+   vector<BoundingBox> BB,
+   int gridx,
+   int gridy,
+   int numEdges,
+   int numWires)
+{
+   int *graph = (int *)malloc(gridx * gridy * sizeof(int));
+   gridToGraph(points, graph, gridx, gridy);
+
+   int attempts = 0;
+   int numSuccessful = 0;
+   int edgeIndex = 0;
+
+   vector<int> unsuccessful;
+   vector<int> successful(numWires);
+   vector<int> reRoute;
+
+   int srcx, srcy, snkx, snky;
+   int rTop; int rBottom; int rLeft; int rRight; //Region boundaries
+
+   while(numSuccessful < numWires && attempts < 2)
+   {
+      attempts++;
+      for(unsigned int i = 0; i < routeList.size(); i++)
+      {
+         int ind = routeList[i];
+         successful[ind] = 1;
+         for(unsigned int j = 0; j < edges[ind].size(); j++)
+         {
+            srcx = W[ind].pins[edges[ind][j].first][0];
+            snkx = W[ind].pins[edges[ind][j].second][0];
+            srcy = W[ind].pins[edges[ind][j].first][1];
+            snky = W[ind].pins[edges[ind][j].second][1];
+
+            rRight = BB[ind].maxx + 5;
+            rRight = rRight > gridx ? gridx - 1 : rRight;
+
+            rLeft = BB[ind].minx - 5;
+            rLeft = rLeft < 0 ? 0 : rLeft;
+
+            rTop = BB[ind].miny - 5;
+            rTop = rTop < 0 ? 0 : rTop;
+
+            rBottom = BB[ind].maxy + 5;
+            rBottom = rBottom > gridy ? gridy - 1 : rBottom;
+
+            
+            int ret  = LM(graph, gridx, gridy, rTop, rBottom, rRight, rLeft, srcx, srcy, snkx, snky, ind, edgeIndex);
+            if(ret == 0)
+            {
+               successful[ind] = 0; //If any edges are unsuccessful then this net is unsuccesful
+            }
+            edgeIndex++;
+         }
+         if(successful[ind] == 1)
+         {
+            numSuccessful++;
+         }
+         else
+         {
+            unsuccessful.push_back(ind);
+         }
+      }
+      if(numSuccessful != numWires)
+      {
+         ripUpReroute(numWires, graph, gridx, gridy, unsuccessful, W, edges, reRoute, BB, dependencyList, &numSuccessful);
+         unsuccessful.clear();
+      }
+
+      
+   }
+
+}
+
+//Perform sequential Lee Moore
 int LM(
    int *graph,
    int gridx,
@@ -582,20 +642,11 @@ int LM(
       costs[i] = vector<int>(gridy, 1E06);
    }
 
-   vector<vector<pair<int, int>>> from(gridx);
-   for(int i = 0; i < gridy; i++)
-   {
-
-   }
-
-   int done;
    int foundSink = 0;
-   int count = 0;
 
    queue<pair<int, int>> Q;
 
    Q.push(make_pair(srcx, srcy));
-   printf("rt: %d, rb %d, rl %d, rr %d\n", rTop, rBottom, rLeft, rRight);
 
    costs[srcx][srcy] = 0;
    frontier[srcx][srcy] = 1;
@@ -682,7 +733,6 @@ int LM(
       int found = 0;
       while(!found)
       {
-         //printf("%d, %d\n", x, y);
          if(x == srcx && y == srcy)
          {
             found = 1;
@@ -732,6 +782,7 @@ int LM(
    return success;
 }
 
+//Go through the unsuccessfully routed nets and find the offending wire, rip this up and add them both to the routing list
 void ripUpReroute(
    int numWires, 
    int *graph,
@@ -780,8 +831,8 @@ void ripUpReroute(
                   rBottom = max(srcy, snky) + 2;
                   rBottom = rBottom >= gridy ? (gridy - 1) : rBottom;
 
+                  //Perform an expansion
                   int blockingWire = expand(rTop, rBottom, rRight, rLeft, numWires, ind, graph, gridx, gridy);
-                  printf("Blocking wire for %d: %d\n", ind, blockingWire);
 
                   ripUp(blockingWire, W[blockingWire].numPins, W[blockingWire].pins, graph, gridx, gridy);
                   reRoute.push_back(ind);
@@ -798,6 +849,7 @@ void ripUpReroute(
    }   
 }
 
+//Performs a search of a region to find the wire that is most encountered
 int expand(int rTop, int rBottom, int rRight, int rLeft, int numWires, int wireIndex, int *graph, int gridx, int gridy)
 {
    vector<int> counter(numWires);
@@ -858,17 +910,6 @@ void gridToGraph(Point **points, int *graph, int gridx, int gridy)
       for(int j = 0; j < gridy; j++)
       {
          graph[gridy * i + j] = points[i][j].obstructedBy;
-      }
-   }
-}
-
-void graphToGrid(Point **points, int *graph, int gridx, int gridy)
-{
-   for(int i = 0; i < gridx; i++)
-   {
-      for(int j = 0; j < gridy; j++)
-      {
-         points[i][j].obstructedBy = graph[gridy * i + j];
       }
    }
 }

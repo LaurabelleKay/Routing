@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <vector>
 #include <queue>
+#include <chrono>
 #include <set>
 
 
@@ -76,9 +77,9 @@ int main(int argc, char **argv)
             infile >> W[i].pins[j][1];
         }
     }
+    
 
     init(points, W, gridx, gridy, numWires, numCells, cells); //Initialise search space
-
     vector<vector<pair<int, int>>>edges(numWires);
 
     int numEdges = spanningTree(W, numWires, edges); //Calculate the spanning tree for each net
@@ -130,7 +131,41 @@ int main(int argc, char **argv)
         }
     }
    
-    schedule(points, W, edges, dependencyList, routeList, BB, gridx, gridy, numEdges, numWires);
+    auto start = std::chrono::high_resolution_clock::now();
+
+    for(int i = 0; i < 50; i++)
+    {
+        schedule(points, W, edges, dependencyList, routeList, BB, gridx, gridy, numEdges, numWires);
+    }
+
+    auto finish = std::chrono::high_resolution_clock::now();
+
+    std::chrono::duration<double> elapsed = finish - start;
+    cout << "CUDA Time: " << elapsed.count() << "s\n";
+
+    init(points, W, gridx, gridy, numWires, numCells, cells);
+    for (int i = 0; i < numWires; i++)
+    {
+        PQ.push(make_pair(BB[i].area, i));
+    }
+
+    routeList.clear();
+    while(!PQ.empty())
+    {
+        routeList.push_back(PQ.top().second);
+        PQ.pop();
+    }
+
+    start = std::chrono::high_resolution_clock::now();
+    for(int i = 0; i < 50; i++)
+    {
+        sequentialSchedule(points, W, edges, dependencyList, routeList, BB, gridx, gridy, numEdges, numWires);
+    }
+    
+    finish = std::chrono::high_resolution_clock::now();
+
+    elapsed = finish - start;
+    cout << "Sequential Time: " << elapsed.count() << "s\n";
 
     return 0;
 }
