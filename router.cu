@@ -38,7 +38,6 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 
 bool toDelete(int n)
 {
-   printf("n: %d\n", n);
    return (n >= 4096);
 }
 
@@ -319,20 +318,19 @@ void schedule(
    while(numSuccessful < numWires && attempts < 5)
    {
       attempts++;
-      regionBoundary = attempts > 1 ? regionBoundary * 4 : regionBoundary;
+      //regionBoundary = attempts > 1 ? regionBoundary * 2 : regionBoundary;
        
       while(!routeList.empty())
       {
          s = 0;
+         printf("numEdges: %d\n", numEdges);
          cudaStream_t *streams = (cudaStream_t *)malloc(numEdges * sizeof(cudaStream_t)); 
-
          gpuErrchk(cudaMallocManaged(&success, numEdges * sizeof(int)));
 
          edgeIndex = 0;
          for(unsigned int i = 0; i < routeList.size(); i++)
          {
             int ind = routeList[i];
-            printf("ind: %d\n", ind);
             for(unsigned int j = 0; j < edges[ind].size(); j++)
             {
                
@@ -363,7 +361,7 @@ void schedule(
                
                dim3 dimBlock(dimx, dimy);
                //printf("rTop: %d, rBottom: %d, rLeft: %d, rRight: %d\n", rTop, rBottom, rLeft, rRight);
-               //printf("dx: %d, dy: %d\n", dimx, dimy);
+               printf("dx: %d, dy: %d\n", dimx, dimy);
                //printf("src: (%d, %d)  snk: (%d, %d)\n", srcx, srcy, snkx, snky);
 
                leeMoore<<<1, dimBlock, 0, streams[s++]>>>(srcx, srcy, snkx, snky, 
@@ -397,7 +395,6 @@ void schedule(
             successful[ind] = 1;
             for(unsigned int j = 0; j < edges[ind].size(); j++)
             {
-
                if(successful[ind] == 0)
                {
                   edgeIndex++; //Don't check any more edges, but we still need our index to increment
@@ -410,12 +407,7 @@ void schedule(
                   successful[ind] = 0; //If any edges are unsucessful, the wire was unsuccessful
                   unsuccessful.push_back(ind);
                }
-
                edgeIndex++;
-            }
-            if(successful[ind] == 1)
-            {
-               numSuccessful++;
             }
          }
          
@@ -430,7 +422,8 @@ void schedule(
                it = std::find(dependencyList[i].begin(), dependencyList[i].end(), routeList[j]);
                if(it != dependencyList[i].end())
                {
-                  dependencyList[i][*it] = 4096;
+                  int index = std::distance(dependencyList[i].begin(), it);
+                  dependencyList[i][index] = 4096;
                }
             }
          }
@@ -453,6 +446,10 @@ void schedule(
          {
             if(dependencyList[i].empty() && done[i] != 1)
             {
+               if(i >= numWires)
+               {
+                  break;
+               }
                routeList.push_back(i);
                numEdges += edges[i].size();
                count ++;
@@ -460,14 +457,20 @@ void schedule(
          }
       }
 
+      numSuccessful = 0;
       for(int i = 0; i < numWires; i++)
       {
          done[i] = 0;
+         if(successful[i] == 1)
+         {
+            numSuccessful++;
+         }
       }
+
+      printf("successful: %d\n", numSuccessful);
       if(numSuccessful != numWires)
       {
-         
-         ripUpReroute(numWires, graph, gridx, gridy, unsuccessful, W, edges, reRoute, BB, dependencyList);
+         ripUpReroute(numWires, graph, gridx, gridy, unsuccessful, W, edges, reRoute, BB, dependencyList, &numSuccessful);
          int count = 0;
 
          dependencyList.clear();
@@ -505,13 +508,14 @@ void schedule(
          }
          unsuccessful.clear();
       }
+      
 
       #ifdef DISPLAY
       drawGrid(gridx, gridy, graph, W); 
       #endif
-
    }
 
+   printf("Total attempts: %d\n", attempts);
    #ifdef DISPLAY
       drawGrid(gridx, gridy, graph, W); 
    #endif
@@ -527,7 +531,8 @@ void ripUpReroute(
    vector<vector<pair<int, int>>> edges,
    vector<int> &reRoute,
    vector<BoundingBox> BB,
-   vector<vector<int>> &dependencyList
+   vector<vector<int>> &dependencyList,
+   int *numSuccessful
 )
 {
    //vector<int> reRoute;
@@ -570,7 +575,7 @@ void ripUpReroute(
                   ripUp(blockingWire, W[blockingWire].numPins, W[blockingWire].pins, graph, gridx, gridy);
                   reRoute.push_back(ind);
 
-                  if(blockingWire != -1)
+                  if(blockingWire >= 0)
                   {
                      ripUp(ind, W[ind].numPins, W[ind].pins, graph, gridx, gridy);
                      reRoute.push_back(blockingWire);
