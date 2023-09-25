@@ -1,8 +1,8 @@
 EXE = router
 EXE2 = routerDisplay
 FLAGS = -Wall
-SFMLPATH = "D:\Laurabelle\Documents\Applications\SFML-2.5.1-windows-vc15-64-bit\SFML-2.5.1\include"
-SFMLLIB = "D:\Laurabelle\Documents\Applications\SFML-2.5.1-windows-vc15-64-bit\SFML-2.5.1\lib"
+SFMLPATH = "\Documents\Applications\SFML-2.5.1-windows-vc15-64-bit\SFML-2.5.1\include"
+SFMLLIB = "\Documents\Applications\SFML-2.5.1-windows-vc15-64-bit\SFML-2.5.1\lib"
 
 all: router.cu main.cpp
 	nvcc router.cu main.cpp -o $(EXE)
